@@ -521,6 +521,91 @@ TEST_CASE("GPU NAM Engine=Auto resolves once at prepare and the choice takes eff
     }
 }
 
+TEST_CASE("GPU NAM dual-mono fast path stays bit-exact through channel divergence",
+          "[nam]") {
+    // When both channels carry identical drive (mono panned to stereo) the CPU
+    // engine runs ONE NAM inference and feeds both channels. The moment the drives
+    // differ it resyncs channel 1's NAM state from channel 0 and runs both. This
+    // proves the whole channel-1 path — fast phase, the divergence resync, and the
+    // diverged phase — is bit-identical to always inferring channel 1 independently.
+    constexpr std::size_t BLOCK = GpuNamProcessor::kInternalBlock;
+    constexpr double SR = 48000.0;
+    const int mono_blocks = 6;
+    const int div_blocks  = 6;
+    const int nblocks = mono_blocks + div_blocks;
+
+    std::vector<float> Lseq(nblocks * BLOCK), Rseq(nblocks * BLOCK);
+    for (int b = 0; b < nblocks; ++b) {
+        for (std::size_t i = 0; i < BLOCK; ++i) {
+            const int n = b * static_cast<int>(BLOCK) + static_cast<int>(i);
+            const float fn = static_cast<float>(n);
+            if (b < mono_blocks) {                       // identical drive → fast path
+                Lseq[n] = Rseq[n] = 0.4f * std::sin(0.05f * fn);
+            } else {                                     // channels diverge
+                Lseq[n] = 0.3f * std::cos(0.07f * fn);
+                Rseq[n] = 0.35f * std::sin(0.031f * fn) + 0.1f;
+            }
+        }
+    }
+
+    // Feed distinct L/R through a fresh CPU-engine processor, concatenating both
+    // output channels.
+    auto run_stereo = [&](const std::vector<float>& L, const std::vector<float>& R,
+                          std::vector<float>& outL, std::vector<float>& outR) {
+        GpuNamProcessor proc;
+        pulp::state::StateStore store;
+        prepare_proc(proc, store, SR, BLOCK, /*engine=*/0.0f);
+        REQUIRE_FALSE(proc.gpu_engine_active());
+        std::vector<float> il(BLOCK), ir(BLOCK), ol(BLOCK), orr(BLOCK);
+        pulp::midi::MidiBuffer mi, mo;
+        pulp::format::ProcessContext pctx;
+        pctx.sample_rate = SR;
+        pctx.num_samples = static_cast<int>(BLOCK);
+        const int nb = static_cast<int>(L.size() / BLOCK);
+        for (int b = 0; b < nb; ++b) {
+            for (std::size_t i = 0; i < BLOCK; ++i) {
+                il[i] = L[b * BLOCK + i];
+                ir[i] = R[b * BLOCK + i];
+            }
+            const float* ip[2] = {il.data(), ir.data()};
+            float* op[2] = {ol.data(), orr.data()};
+            pulp::audio::BufferView<const float> iv(ip, 2, BLOCK);
+            pulp::audio::BufferView<float> ov(op, 2, BLOCK);
+            proc.process(ov, iv, mi, mo, pctx);
+            outL.insert(outL.end(), ol.begin(), ol.end());
+            outR.insert(outR.end(), orr.begin(), orr.end());
+        }
+        proc.release();
+    };
+
+    std::vector<float> realL, realR;
+    run_stereo(Lseq, Rseq, realL, realR);
+
+    // Reference: feed channel 1's full input as mono. Channel 0 always infers, so
+    // its output is the ground truth for what channel 1 must produce.
+    std::vector<float> refL, refR;
+    run_stereo(Rseq, Rseq, refL, refR);
+
+    REQUIRE(realR.size() == refL.size());
+    REQUIRE(realR.size() == static_cast<std::size_t>(nblocks) * BLOCK);
+
+    // Channel 1 (fast path + resync + diverged inference) is bit-identical to the
+    // always-inferred reference.
+    for (std::size_t i = 0; i < realR.size(); ++i) {
+        INFO("sample " << i);
+        REQUIRE(realR[i] == refL[i]);
+    }
+
+    // Sanity: in the mono phase both output channels agree (one shared inference);
+    // after divergence they genuinely differ.
+    for (std::size_t i = 0; i < static_cast<std::size_t>(mono_blocks) * BLOCK; ++i)
+        REQUIRE(realL[i] == realR[i]);
+    double diverged = 0.0;
+    for (std::size_t i = realR.size() - 2 * BLOCK; i < realR.size(); ++i)
+        diverged += std::abs(realL[i] - realR[i]);
+    REQUIRE(diverged > 1e-3);
+}
+
 TEST_CASE("GPU NAM noise gate attenuates a sub-threshold signal", "[nam]") {
     constexpr std::size_t BLOCK = GpuNamProcessor::kInternalBlock;
     constexpr double SR = 48000.0;
