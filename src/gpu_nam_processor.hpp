@@ -135,7 +135,7 @@ public:
             .name = "GPU NAM",
             .manufacturer = "Pulp",
             .bundle_id = "com.pulp.gpunam",
-            .version = "1.1.0",
+            .version = "1.2.0",
             .category = format::PluginCategory::Effect,
             .input_buses = {{"Audio In", 2}},
             .output_buses = {{"Audio Out", 2}},
