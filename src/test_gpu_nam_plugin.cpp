@@ -606,6 +606,69 @@ TEST_CASE("GPU NAM dual-mono fast path stays bit-exact through channel divergenc
     REQUIRE(diverged > 1e-3);
 }
 
+TEST_CASE("GPU NAM CPU-only path reports zero latency and matches the re-block path",
+          "[nam]") {
+    // A CPU-only model (LSTM is not GPU-eligible) at matched rates with no IR has no
+    // possible CPU↔GPU switch, so the re-block FIFO buys nothing — the host block
+    // runs straight through the per-sample engine at ZERO added latency.
+    namespace fs = std::filesystem;
+    const std::string lstm = (fs::path(GPU_NAM_MODELS_DIR) / "lstm.nam").string();
+    if (!fs::exists(lstm)) { WARN("missing lstm.nam fixture; skipping"); return; }
+
+    constexpr double SR = 48000.0;
+
+    // The direct path reports zero latency and never engages the GPU.
+    {
+        GpuNamProcessor proc;
+        pulp::state::StateStore store;
+        proc.set_state_store(&store);
+        proc.define_parameters(store);
+        store.set_value(kMix, 100.0f);
+        store.set_value(kBypass, 0.0f);
+        store.set_value(kEngine, 0.0f);
+        proc.load_model(lstm);
+        pulp::format::PrepareContext ctx;
+        ctx.sample_rate = SR; ctx.max_buffer_size = 128;
+        ctx.input_channels = 2; ctx.output_channels = 2;
+        proc.prepare(ctx);
+        if (proc.latency_samples() != 0) {
+            WARN("lstm.nam is not " << SR << " Hz (resampling forces the FIFO); skipping");
+            proc.release();
+            return;
+        }
+        CHECK(proc.latency_samples() == 0);
+        CHECK_FALSE(proc.gpu_engine_active());
+        proc.release();
+    }
+
+    // Equivalence: the direct (no-IR, zero-latency) output equals the re-block path
+    // running the SAME model behind an identity IR — which forces the FIFO and its
+    // kInternalBlock latency — once each is trimmed by its own reported latency. The
+    // NAM+tone+DC math is identical per sample; the only difference is the identity
+    // convolver's FFT round-trip, so a tight tolerance rather than bit-exact.
+    const auto sig = drive_signal(SR, 4096);
+    const std::string id_ir =
+        (fs::temp_directory_path() / "gpu_nam_f15_identity.wav").string();
+    write_ir_wav(id_ir, {1.0f}, static_cast<std::uint32_t>(SR));
+
+    // A host block that is NOT a multiple of kInternalBlock exercises the direct
+    // path's variable-width handling.
+    const auto direct = run_stream_cpu_model_ir(SR, 100, sig, lstm, "");
+    const auto reblock = run_stream_cpu_model_ir(SR, 100, sig, lstm, id_ir);
+    std::filesystem::remove(id_ir);
+
+    REQUIRE(all_finite(direct));
+    REQUIRE(signal_rms(direct) > 1e-4);                 // the amp produced real output
+    const std::size_t cmp = std::min(direct.size(), reblock.size());
+    REQUIRE(cmp > 2048);
+    double max_abs = 0.0;
+    for (std::size_t i = 0; i < cmp; ++i)
+        max_abs = std::max(max_abs,
+                           std::abs(static_cast<double>(direct[i]) - reblock[i]));
+    INFO("max |direct - reblock| = " << max_abs);
+    REQUIRE(max_abs < 1e-4);
+}
+
 TEST_CASE("GPU NAM noise gate attenuates a sub-threshold signal", "[nam]") {
     constexpr std::size_t BLOCK = GpuNamProcessor::kInternalBlock;
     constexpr double SR = 48000.0;
