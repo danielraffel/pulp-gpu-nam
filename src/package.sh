@@ -5,8 +5,9 @@
 # This file is just the GPU-NAM-specific inputs; the packaging logic lives in the
 # shared tool so every plugin uses the same one.
 set -euo pipefail
-HERE="$(cd "$(dirname "$0")" && pwd)"
-ROOT="$(cd "$HERE/../.." && pwd)"
+HERE="$(cd "$(dirname "$0")" && pwd)"        # the src/ dir
+ROOT="$(cd "$HERE/.." && pwd)"               # the pulp-gpu-nam repo root
+PULP="$ROOT/pulp"                            # the Pulp submodule (packaging tooling)
 BUILD="${BUILD:-$ROOT/build}"
 VER="${VER:-1.1.0}"
 APP_ID="${APP_ID:-D10A184D5A207EAA926955447DC27E2AD965DFB8}"   # Developer ID Application
@@ -34,10 +35,10 @@ args=(--name GpuNam --version "$VER"
       --plugin au   "$BUILD/AU/GpuNam.component"
       --plugin vst3 "$BUILD/VST3/GpuNam.vst3"
       --plugin clap "$BUILD/CLAP/GpuNam.clap"
-      --app "Standalone app" "$BUILD/examples/gpu-nam/GpuNam.app"
+      --app "Standalone app" "$BUILD/src/GpuNam.app"
       --content "Sample models & cabinet" \
                 "NAM example captures (two WaveNet sizes + an LSTM) and a cabinet IR, installed to /Library/Application Support/GPU NAM. Optional — the plugin's file choosers open here first." \
                 "/Library/Application Support/GPU NAM" "$CONTENT")
 
 # Not exec'd: run as a child so package.sh's EXIT trap cleans the content tree.
-"$ROOT/tools/scripts/build_combined_installer.sh" "${args[@]}"
+"$PULP/tools/scripts/build_combined_installer.sh" "${args[@]}"
