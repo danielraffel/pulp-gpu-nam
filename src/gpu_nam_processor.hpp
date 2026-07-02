@@ -475,6 +475,7 @@ public:
             out_rs_[ch].reset();
         }
         wet_.assign(kInternalBlock, 0.0f);
+        nam_share_.assign(kInternalBlock, 0.0f);
         rs_drive_.assign(max_block, 0.0f);
         {
             std::lock_guard<std::mutex> lock(model_mutex_);
@@ -810,22 +811,61 @@ private:
     // oracle per channel, delay by the GPU transport's fixed extra latency so the
     // two engines align, and push to the output FIFO. RT-safe (no alloc/free).
     void fill_wet_cpu() {
+        static_assert(kChannels == 2, "dual-mono fast path assumes stereo");
         CpuEngine* cpu = cpu_active_.load(std::memory_order_seq_cst);
-        for (std::size_t ch = 0; ch < kChannels; ++ch) {
-            while (in_len_[ch] >= kInternalBlock) {
-                if (cpu) cpu->model[ch].process(in_buf_[ch].data(), wet_.data(),
-                                                static_cast<std::uint32_t>(kInternalBlock));
-                else std::memset(wet_.data(), 0, kInternalBlock * sizeof(float));
-                std::memmove(in_buf_[ch].data(), in_buf_[ch].data() + kInternalBlock,
-                             (in_len_[ch] - kInternalBlock) * sizeof(float));
-                in_len_[ch] -= kInternalBlock;
-                apply_tone(ch, wet_.data());
-                apply_ir(ch, wet_.data());
-                delay_cpu_wet(ch);
-                std::memcpy(out_buf_[ch].data() + out_len_[ch], wet_.data(),
-                            kInternalBlock * sizeof(float));
-                out_len_[ch] += kInternalBlock;
+        // A fresh engine (prepare or a live model swap) publishes two identical
+        // prewarmed channels, so the fast path is eligible again — reset the latch
+        // on the audio thread when the engine pointer changes (no cross-thread race).
+        if (cpu != fill_cpu_seen_) { nam_diverged_ = false; fill_cpu_seen_ = cpu; }
+
+        const std::size_t bytes = kInternalBlock * sizeof(float);
+        // Both channels are fed the same host-sample count, so their FIFOs advance
+        // in lockstep. When a mono source is panned to stereo the two drives are
+        // bit-identical, so one NAM inference feeds both (the dominant cost); tone,
+        // IR, and delay still run per channel. The first block where the drives
+        // differ resyncs channel 1's NAM state from channel 0 (identical shared
+        // history) and retires the fast path for the engine's lifetime — keeping
+        // the diverged output bit-exact against always running both engines.
+        while (in_len_[0] >= kInternalBlock && in_len_[1] >= kInternalBlock) {
+            const bool mono = cpu && !nam_diverged_ &&
+                std::memcmp(in_buf_[0].data(), in_buf_[1].data(), bytes) == 0;
+            if (cpu && !nam_diverged_ && !mono) {
+                // Channels just diverged: copy channel 0's NAM state (which carries
+                // the shared history up to here) into channel 1 before either runs,
+                // then latch. Same-shape runtimes reuse their storage on assign, so
+                // this is alloc-free and happens at most once per engine.
+                cpu->model[1] = cpu->model[0];
+                nam_diverged_ = true;
             }
+
+            // Channel 0 — always inferred.
+            if (cpu) cpu->model[0].process(in_buf_[0].data(), wet_.data(),
+                                           static_cast<std::uint32_t>(kInternalBlock));
+            else std::memset(wet_.data(), 0, bytes);
+            if (mono) std::memcpy(nam_share_.data(), wet_.data(), bytes);
+            std::memmove(in_buf_[0].data(), in_buf_[0].data() + kInternalBlock,
+                         (in_len_[0] - kInternalBlock) * sizeof(float));
+            in_len_[0] -= kInternalBlock;
+            apply_tone(0, wet_.data());
+            apply_ir(0, wet_.data());
+            delay_cpu_wet(0);
+            std::memcpy(out_buf_[0].data() + out_len_[0], wet_.data(), bytes);
+            out_len_[0] += kInternalBlock;
+
+            // Channel 1 — reuse channel 0's NAM output on the mono fast path,
+            // otherwise infer independently. Its own tone/IR/delay always run.
+            if (mono) std::memcpy(wet_.data(), nam_share_.data(), bytes);
+            else if (cpu) cpu->model[1].process(in_buf_[1].data(), wet_.data(),
+                                                static_cast<std::uint32_t>(kInternalBlock));
+            else std::memset(wet_.data(), 0, bytes);
+            std::memmove(in_buf_[1].data(), in_buf_[1].data() + kInternalBlock,
+                         (in_len_[1] - kInternalBlock) * sizeof(float));
+            in_len_[1] -= kInternalBlock;
+            apply_tone(1, wet_.data());
+            apply_ir(1, wet_.data());
+            delay_cpu_wet(1);
+            std::memcpy(out_buf_[1].data() + out_len_[1], wet_.data(), bytes);
+            out_len_[1] += kInternalBlock;
         }
     }
 
@@ -1253,6 +1293,14 @@ private:
     std::array<std::size_t, kChannels> cpu_extra_pos_{};
     std::array<std::vector<float>, kChannels> gpu_wet_{};
     std::vector<float> wet_;                                  // internal-block scratch
+    // Dual-mono fast path (audio-thread only): when both channels' drive is
+    // identical, one NAM inference feeds both. nam_share_ holds channel 0's NAM
+    // output for reuse; nam_diverged_ latches once the channels differ (retiring
+    // the fast path for the engine's lifetime); fill_cpu_seen_ detects an engine
+    // swap so the latch resets when a fresh (re-synced) engine is published.
+    std::vector<float> nam_share_;
+    bool nam_diverged_ = false;
+    CpuEngine* fill_cpu_seen_ = nullptr;
 
     // Sample-rate conversion around the model. NAM captures are trained at a fixed
     // rate (usually 48 kHz); running the network at a different rate shifts its
