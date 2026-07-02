@@ -65,6 +65,22 @@ if(GPU_NAM_USE_INSTALLED_PULP)
             add_library(pulp::${_pulp_lib} ALIAS Pulp::${_pulp_lib})
         endif()
     endforeach()
+
+    # GPU NAM's engine needs the SDK's GPU stack. A Pulp SDK built without GPU
+    # (no pulp::render / pulp::gpu-audio) would otherwise configure "successfully"
+    # but silently skip every GpuNam plugin target in src/ (guarded on those
+    # targets), leaving a build with only the auxiliary test binaries. The
+    # submodule path forces PULP_ENABLE_GPU=ON, so fail loudly here to match.
+    foreach(_pulp_gpu_req render gpu-audio)
+        if(NOT TARGET pulp::${_pulp_gpu_req})
+            message(FATAL_ERROR
+                "GPU_NAM_USE_INSTALLED_PULP=ON but the installed Pulp SDK provides no "
+                "pulp::${_pulp_gpu_req} target. GPU NAM requires a GPU-enabled SDK "
+                "(built with PULP_REQUIRE_GPU_FOR_SDK=ON / PULP_ENABLE_GPU=ON). "
+                "Install a GPU SDK, or drop -DGPU_NAM_USE_INSTALLED_PULP=ON to build "
+                "the vendored submodule.")
+        endif()
+    endforeach()
 else()
     if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/pulp/CMakeLists.txt")
         message(FATAL_ERROR
