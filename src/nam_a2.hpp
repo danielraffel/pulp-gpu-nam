@@ -568,6 +568,13 @@ public:
             if (variants_[i].max_value >= size) { pick = static_cast<int>(i); break; }
         const bool changed = pick != active_;
         active_ = pick;
+        if (changed)
+            // Each variant keeps its own conv rings. Without clearing, re-activating
+            // a variant (A→B→A) resumes it with a receptive-field of stale audio —
+            // an audible garbage transient. Zeroing gives a clean settle instead;
+            // reaching true steady state still wants an off-thread prewarm (as a
+            // model swap does), which the caller should schedule on a size change.
+            variants_[static_cast<std::size_t>(pick)].model.reset();
         return changed;
     }
 

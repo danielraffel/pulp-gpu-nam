@@ -72,6 +72,9 @@ public:
         bias_.assign(bias ? static_cast<std::size_t>(out_ch) : 0u, 0.0f);
         reach_ = (kernel - 1) * dilation;            // oldest tap reaches this far back
         slots_ = reach_ + 1;                          // history columns (incl. current)
+        // Size the history ring here (off the audio thread) so reset() only ever
+        // has to fill it — keeping a live variant/size switch allocation-free.
+        history_.assign(static_cast<std::size_t>(slots_) * in_ch_, 0.0f);
         reset();
     }
 
@@ -94,7 +97,10 @@ public:
     }
 
     void reset() {
-        history_.assign(static_cast<std::size_t>(slots_) * in_ch_, 0.0f);
+        // history_ is sized to slots_*in_ch_ at configure/load and never resized,
+        // so fill (never assign) keeps reset allocation-free — safe to call from
+        // the audio thread (e.g. a live size/variant switch).
+        std::fill(history_.begin(), history_.end(), 0.0f);
         head_ = 0;
     }
 
