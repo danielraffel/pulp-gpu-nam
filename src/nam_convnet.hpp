@@ -71,6 +71,7 @@ class ConvNetBlock {
 public:
     void configure(int in_ch, int channels, int dilation, bool batchnorm, Activation act) {
         channels_ = channels;
+        dilation_ = dilation;   // record so dilation() reports the block's real value
         batchnorm_ = batchnorm;
         act_ = act;
         conv_.configure(in_ch, channels, /*kernel=*/2, dilation, /*bias=*/!batchnorm);

@@ -106,7 +106,12 @@ public:
                 for (std::uint32_t i = 0; i < n; ++i) out[i] = 0.0f;
                 continue;
             }
-            gpu_[ch].forward(in, out, n);
+            // On device loss / readback timeout, forward() leaves `out` holding the
+            // previous block (a stuck, repeating block if published as-is). Fall back
+            // to the prewarmed per-channel CPU oracle so the worker still emits fresh,
+            // correct audio for this block.
+            if (!gpu_[ch].forward(in, out, n))
+                cpu_[ch].process(in, out, n);
         }
     }
 
