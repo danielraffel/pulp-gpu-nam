@@ -497,6 +497,30 @@ TEST_CASE("GPU NAM switches Engine CPU->GPU->CPU live at fixed latency", "[nam][
     proc.release();
 }
 
+TEST_CASE("GPU NAM Engine=Auto resolves once at prepare and the choice takes effect",
+          "[nam][engine]") {
+    // Auto (Engine==2) benchmarks the CPU at prepare and picks CPU or GPU. The
+    // resolved engine must actually drive the live path — gpu_engine_active() has
+    // to agree with the resolution, which proves the selection wired through.
+    {
+        GpuNamProcessor proc;
+        pulp::state::StateStore store;
+        prepare_proc(proc, store, 48000.0, 128, /*engine=*/2.0f);
+        const int resolved = proc.auto_resolved_engine();
+        CHECK((resolved == 0 || resolved == 1));
+        CHECK(proc.gpu_engine_active() == (resolved == 1));
+        proc.release();
+    }
+    // Manual CPU (Engine==0) always stays on the CPU, independent of any device.
+    {
+        GpuNamProcessor proc;
+        pulp::state::StateStore store;
+        prepare_proc(proc, store, 48000.0, 128, /*engine=*/0.0f);
+        CHECK_FALSE(proc.gpu_engine_active());
+        proc.release();
+    }
+}
+
 TEST_CASE("GPU NAM noise gate attenuates a sub-threshold signal", "[nam]") {
     constexpr std::size_t BLOCK = GpuNamProcessor::kInternalBlock;
     constexpr double SR = 48000.0;
