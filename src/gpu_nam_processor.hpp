@@ -59,7 +59,9 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cmath>
+#include <limits>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -122,6 +124,10 @@ public:
     // 48 kHz; the re-block FIFO adds this much latency, reported for host PDC.
     static constexpr std::size_t kInternalBlock = 512;
 
+    // Engine=Auto offloads to the GPU only when the measured CPU inference exceeds
+    // this fraction of one internal block's real-time budget.
+    static constexpr double kAutoGpuBudgetFraction = 0.5;
+
     ~GpuNamProcessor() override { stop_worker(); }
 
     format::PluginDescriptor descriptor() const override {
@@ -144,10 +150,12 @@ public:
                              .range = {-40.0f, 40.0f, 0.0f, 0.0f}});
         store.add_parameter({.id = kMix, .name = "Mix", .unit = "%",
                              .range = {0.0f, 100.0f, 100.0f, 0.1f}});
-        // Engine: 0 = inline CPU oracle (default), 1 = GPU runtime. CPU is the
-        // default — the live GPU path is opt-in.
+        // Engine: 0 = inline CPU oracle (default), 1 = GPU runtime, 2 = Auto.
+        // CPU is the default — the live GPU path stays opt-in. Auto benchmarks the
+        // CPU cost once at prepare and offloads to the GPU only when the CPU can't
+        // comfortably meet the block's real-time budget (see resolve_auto_engine).
         store.add_parameter({.id = kEngine, .name = "Engine", .unit = "",
-                             .range = {0.0f, 1.0f, 0.0f, 1.0f}});
+                             .range = {0.0f, 2.0f, 0.0f, 1.0f}});
         store.add_parameter({.id = kBypass, .name = "Bypass", .unit = "",
                              .range = {0.0f, 1.0f, 0.0f, 1.0f}});
         store.add_parameter({.id = kNoiseGateThreshold, .name = "Gate", .unit = "dB",
@@ -269,6 +277,12 @@ public:
     /// requested AND a GPU device is available AND the transport is published).
     bool gpu_engine_active() const {
         return gpu_engine_active_.load(std::memory_order_acquire);
+    }
+
+    /// The engine that Engine=Auto resolved to at prepare(): 0 = CPU, 1 = GPU.
+    /// Meaningful only while the Engine parameter is Auto. UI/main-thread only.
+    int auto_resolved_engine() const {
+        return auto_resolved_engine_.load(std::memory_order_relaxed);
     }
 
     /// The live GPU backend ("Metal"/"D3D12"/"Vulkan") when the GPU engine is
@@ -546,8 +560,10 @@ public:
         if (const std::string ipath = current_requested_ir_path(); !ipath.empty())
             build_and_publish_ir(ipath);
 
-        requested_engine_.store(state().get_value(kEngine) >= 0.5f ? 1 : 0,
-                                std::memory_order_relaxed);
+        // Engine=Auto picks CPU vs GPU from a one-time CPU benchmark on the
+        // prewarmed model (needs current_cpu_ + device_available_, both ready here).
+        if (state().get_value(kEngine) >= 1.5f) resolve_auto_engine();
+        requested_engine_.store(resolve_engine_selection(), std::memory_order_relaxed);
         if (requested_engine_.load(std::memory_order_relaxed) == 1) {
             std::lock_guard<std::mutex> lock(stack_mutex_);
             if (current_stack_) {
@@ -615,8 +631,7 @@ public:
                                                  kNormalizeMaxAbsDb);
         const float out_gain = std::pow(10.0f, state().get_value(kOutputGain) / 20.0f) * norm;
 
-        requested_engine_.store(state().get_value(kEngine) >= 0.5f ? 1 : 0,
-                                std::memory_order_relaxed);
+        requested_engine_.store(resolve_engine_selection(), std::memory_order_relaxed);
 
         // Retune the gate + tone stack from the live parameters (only when they
         // change, at this block boundary — the RT-safe way to move IIR/gate coeffs).
@@ -745,6 +760,51 @@ private:
         std::unique_ptr<GpuNamCloudNode> node;
         std::unique_ptr<gpu_audio::GpuAudioTransport> transport;
     };
+
+    // Map the raw Engine parameter (0=CPU, 1=GPU, 2=Auto) to the effective engine
+    // (0=CPU, 1=GPU). Auto returns the choice benchmarked at prepare().
+    int resolve_engine_selection() const {
+        const float v = state().get_value(kEngine);
+        if (v >= 1.5f) return auto_resolved_engine_.load(std::memory_order_relaxed);
+        return v >= 0.5f ? 1 : 0;
+    }
+
+    // Engine=Auto: benchmark the CPU inference cost once (off the audio thread, on
+    // the prewarmed model copy) and offload to the GPU only when the CPU would eat
+    // more than kAutoGpuBudgetFraction of one internal block's real-time budget.
+    // Small models (the common case) stay on the CPU, avoiding the GPU's fixed
+    // submit/readback overhead; heavy models move to the GPU. With no GPU device
+    // the answer is always CPU. Runs at prepare(), never on the audio thread.
+    void resolve_auto_engine() {
+        int choice = 0;  // CPU
+        CpuEngine* cpu = current_cpu_.get();
+        if (device_available_ && cpu) {
+            std::vector<float> in(kInternalBlock, 0.25f), out(kInternalBlock, 0.0f);
+            const auto once = [&] {
+                cpu->model[0].process(in.data(), out.data(),
+                                      static_cast<std::uint32_t>(kInternalBlock));
+            };
+            once();  // warm caches / branch predictors
+            double best_us = std::numeric_limits<double>::max();
+            for (int i = 0; i < 8; ++i) {
+                const auto t0 = std::chrono::steady_clock::now();
+                once();
+                const auto t1 = std::chrono::steady_clock::now();
+                best_us = std::min(best_us,
+                    std::chrono::duration<double, std::micro>(t1 - t0).count());
+            }
+            const double rate = resample_active_ ? internal_rate_ : sample_rate_;
+            const double budget_us =
+                rate > 0.0 ? static_cast<double>(kInternalBlock) / rate * 1e6 : 0.0;
+            if (budget_us > 0.0 && best_us > budget_us * kAutoGpuBudgetFraction)
+                choice = 1;  // CPU too heavy for the RT budget → offload to the GPU
+            // The benchmark advanced channel 0's history; restore it to match the
+            // other channels' freshly-prewarmed state before audio starts.
+            cpu->model[0].reset();
+            cpu->model[0].prewarm();
+        }
+        auto_resolved_engine_.store(choice, std::memory_order_relaxed);
+    }
 
     // CPU engine: re-block the drive FIFO into fixed blocks, run the inline NAM
     // oracle per channel, delay by the GPU transport's fixed extra latency so the
@@ -1255,6 +1315,8 @@ private:
     std::thread worker_;
     std::atomic<bool> worker_run_{false};
     std::atomic<int> requested_engine_{0};
+    // Engine=Auto resolves to this (0 = CPU, 1 = GPU), decided at prepare().
+    std::atomic<int> auto_resolved_engine_{0};
     std::mutex model_req_mutex_;
     std::string requested_model_path_;
     std::atomic<std::uint32_t> model_req_generation_{0};
