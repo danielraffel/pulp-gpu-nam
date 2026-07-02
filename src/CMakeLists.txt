@@ -222,8 +222,12 @@ if(TARGET pulp::render AND TARGET pulp::gpu-audio)
     endforeach()
 
     # Self-contained, relocatable GPU bundles (the @loader_path fix) — fail the
-    # build if any bundle bakes a build-tree dylib path.
-    include(${GPU_NAM_PULP_DIR}/tools/cmake/PulpBundleRelocatable.cmake)
+    # build if any bundle bakes a build-tree dylib path. In installed-SDK mode
+    # find_package(Pulp) (via PulpConfig) already defines these helpers; only the
+    # submodule build needs to include the module from the source tree.
+    if(NOT GPU_NAM_USE_INSTALLED_PULP)
+        include(${GPU_NAM_PULP_DIR}/tools/cmake/PulpBundleRelocatable.cmake)
+    endif()
     foreach(_gn_target GpuNam_CLAP GpuNam_VST3 GpuNam_AU GpuNam_Standalone)
         if(TARGET ${_gn_target})
             pulp_make_bundle_relocatable(${_gn_target})
