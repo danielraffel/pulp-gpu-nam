@@ -3,11 +3,13 @@
 // GpuNamCloudNode — the GPU audio runtime node behind GPU NAM's opt-in GPU
 // engine.
 //
-// It wraps one GpuNam per channel (each driving the fused GPU `wavenet_forward`
-// on its own compute device — the plan is device-resident, so channels cannot
-// share a device) and runs them as a GpuAudioNode on the transport's non-real-
-// time worker. process_block() runs the GPU forward for exactly one fixed block
-// per channel; the mono NAM model is applied independently to each channel.
+// It wraps one GpuNam per channel, all sharing ONE compute device: the WaveNet
+// plans are keyed by (block_size, instance), so each channel gets its own plan
+// slot (instance = channel) and its own dilation history on the shared device.
+// Stereo therefore costs one Dawn device + one weight/pipeline set instead of
+// two. It runs as a GpuAudioNode on the transport's non-real-time worker.
+// process_block() runs the GPU forward for exactly one fixed block per channel;
+// the mono NAM model is applied independently to each channel.
 //
 // The GPU forward blocks on the device readback, so it is NEVER run on the audio
 // thread — only the transport worker calls process_block(). A missed block uses
@@ -22,6 +24,7 @@
 #include <pulp/gpu_audio/gpu_audio_node.hpp>
 
 #include <array>
+#include <memory>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -54,12 +57,17 @@ public:
         return d;
     }
 
-    // Non-RT: prepare one GPU NAM forward per channel (each on its own device)
-    // and a per-channel CPU copy for the fallback path. Returns false (→ the
-    // transport prepare fails and the processor routes the inline CPU engine) if
-    // no device is available or the model shape is unsupported on the GPU.
+    // Non-RT: prepare one GPU NAM forward per channel — all on ONE shared device,
+    // each on its own plan slot (instance = channel) — plus a per-channel CPU copy
+    // for the fallback path. Returns false (→ the transport prepare fails and the
+    // processor routes the inline CPU engine) if no device is available or the
+    // model shape is unsupported on the GPU.
     bool prepare() override {
         if (!model_ || channels_ == 0 || channels_ > kNamChannels) return false;
+        // One device for all channels. If it can't be created, fail closed so the
+        // processor routes the inline CPU engine (same contract as before).
+        shared_gpu_ = render::GpuCompute::create();
+        if (!shared_gpu_ || !shared_gpu_->initialize_standalone()) return false;
         // Prewarm both the GPU forward's on-device history and the CPU fallback to
         // the model's silence steady-state (a NAM capture's silence response is not
         // zero, and the dilated history takes a full receptive field to populate).
@@ -71,7 +79,7 @@ public:
             (warm + static_cast<int>(block_size_) - 1) / static_cast<int>(block_size_);
         std::vector<float> zeros(block_size_, 0.0f), scratch(block_size_, 0.0f);
         for (std::uint32_t ch = 0; ch < channels_; ++ch) {
-            if (!gpu_[ch].prepare(*model_, block_size_)) return false;
+            if (!gpu_[ch].prepare_with(*shared_gpu_, *model_, block_size_, ch)) return false;
             for (int b = 0; b < warm_blocks; ++b)
                 gpu_[ch].forward(zeros.data(), scratch.data(), block_size_);
             // Per-channel CPU oracle for the CpuFallback miss policy: same silence
@@ -84,11 +92,11 @@ public:
     }
 
     bool gpu_available() const {
-        return channels_ > 0 && gpu_[0].gpu() != nullptr;
+        return channels_ > 0 && shared_gpu_ != nullptr;
     }
     std::string backend() const {
-        if (channels_ == 0 || gpu_[0].gpu() == nullptr) return std::string();
-        return gpu_[0].gpu()->capabilities().backend;
+        if (channels_ == 0 || shared_gpu_ == nullptr) return std::string();
+        return shared_gpu_->capabilities().backend;
     }
 
     // Worker context. Run the fused GPU NAM forward for one fixed block per
@@ -141,6 +149,9 @@ private:
     std::uint32_t sample_rate_ = 0;
     const nam::NamModel* model_ = nullptr;
 
+    // One device shared by every channel; each GpuNam below holds a non-owning
+    // pointer to it and its own (block_size, instance=channel) plan slot.
+    std::unique_ptr<render::GpuCompute> shared_gpu_;
     std::array<nam::GpuNam, kNamChannels> gpu_{};
     std::array<nam::NamModel, kNamChannels> cpu_{};  // CpuFallback oracle (per channel)
 };

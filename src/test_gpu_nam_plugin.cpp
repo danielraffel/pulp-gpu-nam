@@ -456,6 +456,88 @@ TEST_CASE("GPU NAM GPU engine reproduces the CPU engine", "[nam][gpu]") {
     proc.release();
 }
 
+TEST_CASE("GPU NAM GPU engine keeps stereo channels independent on the shared device",
+          "[nam][gpu]") {
+    // Both channels' WaveNet forwards run on ONE shared Dawn device, each on its own
+    // (block_size, instance) plan slot. Drive DISTINCT left/right signals so a plan
+    // collision (e.g. both channels defaulting to instance 0) is visible: each GPU
+    // channel must reproduce its OWN channel's CPU reference, not the other's. The
+    // mono-in dual-mono tests can't catch this — they feed identical L/R.
+    constexpr std::size_t BLOCK = GpuNamProcessor::kInternalBlock;
+    constexpr double SR = 48000.0;
+    const int nblocks = 32;
+
+    // Distinct L/R: different frequency + phase, so cross-channel leakage decorrelates.
+    std::vector<float> inL, inR;
+    for (int b = 0; b < nblocks; ++b) {
+        for (std::size_t i = 0; i < BLOCK; ++i) {
+            const float t = static_cast<float>(b * BLOCK + i);
+            inL.push_back(0.50f * std::sin(0.060f * t));
+            inR.push_back(0.45f * std::sin(0.130f * t + 0.7f));
+        }
+    }
+
+    long blocks = 0, misses = 0;
+    auto drive = [&](float engine, std::vector<float>& oL, std::vector<float>& oR,
+                     int settle_ms) -> bool {
+        GpuNamProcessor proc;
+        pulp::state::StateStore store;
+        prepare_proc(proc, store, SR, BLOCK, engine);
+        if (engine == 1.0f && !proc.gpu_engine_active()) { proc.release(); return false; }
+        pulp::midi::MidiBuffer mi, mo;
+        pulp::format::ProcessContext pctx;
+        pctx.sample_rate = SR; pctx.num_samples = static_cast<int>(BLOCK);
+        std::vector<float> l(BLOCK), r(BLOCK), ol(BLOCK), orr(BLOCK);
+        for (int b = 0; b < nblocks; ++b) {
+            for (std::size_t i = 0; i < BLOCK; ++i) {
+                l[i] = inL[b * BLOCK + i];
+                r[i] = inR[b * BLOCK + i];
+            }
+            const float* ip[2] = {l.data(), r.data()};
+            float* op[2] = {ol.data(), orr.data()};
+            pulp::audio::BufferView<const float> iv(ip, 2, BLOCK);
+            pulp::audio::BufferView<float> ov(op, 2, BLOCK);
+            proc.process(ov, iv, mi, mo, pctx);
+            if (settle_ms > 0) std::this_thread::sleep_for(std::chrono::milliseconds(settle_ms));
+            oL.insert(oL.end(), ol.begin(), ol.end());
+            oR.insert(oR.end(), orr.begin(), orr.end());
+        }
+        if (engine == 1.0f) {
+            const auto s = proc.gpu_block_stats();
+            blocks = static_cast<long>(s.first);
+            misses = static_cast<long>(s.second);
+        }
+        proc.release();
+        return true;
+    };
+
+    std::vector<float> cpuL, cpuR, gpuL, gpuR;
+    drive(0.0f, cpuL, cpuR, 0);  // per-channel CPU reference (independent by construction)
+    if (!drive(1.0f, gpuL, gpuR, 12)) {
+        WARN("GPU engine unavailable — skipping stereo-independence test (CPU path covered).");
+        return;
+    }
+    // The compared output must be genuinely GPU-produced: a missed block is filled
+    // by the per-channel INDEPENDENT CPU oracle, which would mask a GPU-side channel
+    // collision (the outputs would look independent because they came from the CPU
+    // fallback, not the shared device). Require the GPU produced the majority of
+    // blocks so the independence claim is about the shared-device path.
+    INFO("GPU blocks=" << blocks << " misses=" << misses);
+    REQUIRE(blocks > 0);
+    REQUIRE(misses * 2 < blocks);
+
+    const int skip = 12 * static_cast<int>(BLOCK);
+    const int len = 14 * static_cast<int>(BLOCK);
+    const int maxlag = 4 * static_cast<int>(BLOCK);
+    const double ll = best_lag_xcorr(gpuL, cpuL, skip, len, maxlag);  // ch0 GPU vs ch0 CPU
+    const double rr = best_lag_xcorr(gpuR, cpuR, skip, len, maxlag);  // ch1 GPU vs ch1 CPU
+    const double rl = best_lag_xcorr(gpuR, cpuL, skip, len, maxlag);  // ch1 GPU vs ch0 CPU (collision)
+    INFO("L->L=" << ll << " R->R=" << rr << " R->L(cross)=" << rl);
+    REQUIRE(ll > 0.99);   // channel 0 reproduces its own reference
+    REQUIRE(rr > 0.99);   // channel 1 reproduces ITS OWN reference (the earlier defect was here)
+    REQUIRE(rr > rl);     // channel 1 is not running channel 0's stream (plan-slot isolation)
+}
+
 TEST_CASE("GPU NAM switches Engine CPU->GPU->CPU live at fixed latency", "[nam][gpu]") {
     constexpr std::size_t BLOCK = GpuNamProcessor::kInternalBlock;
     constexpr double SR = 48000.0;
