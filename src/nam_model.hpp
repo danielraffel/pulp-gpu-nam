@@ -43,6 +43,7 @@
 // approximation, off by default; this reference uses the exact std::tanh path).
 
 #include <cmath>
+#include <limits>
 #include <cstddef>
 #include <cstdint>
 #include <fstream>
@@ -515,6 +516,40 @@ inline double num(const choc::value::ValueView& v) {
     return v.getWithDefault<double>(0.0);
 }
 
+// True iff `d` survives the narrowing to the float that actually gets stored as a
+// weight. Checking std::isfinite on the double alone is not enough: a finite but
+// out-of-range magnitude like 1e300 passes isfinite yet overflows to ±inf when
+// narrowed to float (an out-of-range double→float cast is itself undefined
+// behavior). Bounding |d| by FLT_MAX first rejects such a weight before the cast,
+// so a hostile file can't slip a value that becomes inf/NaN in the network state.
+inline bool finite_as_float(double d) {
+    return std::isfinite(d)
+           && d <= static_cast<double>(std::numeric_limits<float>::max())
+           && d >= static_cast<double>(std::numeric_limits<float>::lowest());
+}
+
+// Parse a JSON value as an integer in [lo, hi]. Sets ok=false (never flips it back
+// to true) on anything that is not a finite, integral number in range — including
+// strings/objects/arrays/bools, NaN/Inf, fractional values, and out-of-range
+// magnitudes like 1e100 that would be undefined behavior to cast to int. Returns
+// lo on failure so downstream sizing arithmetic stays bounded. This is the shared
+// twin of nam_a2.hpp's detail_a2::parse_int, adopted by every .nam loader so a
+// hostile integer field can never drive an unchecked cast or a pre-validation
+// allocation.
+inline long parse_int(const choc::value::ValueView& v, long lo, long hi, bool& ok) {
+    if (v.isVoid() || v.isObject() || v.isArray() || v.isString() || v.isBool()) {
+        ok = false;
+        return lo;
+    }
+    const double d = num(v);
+    if (!std::isfinite(d) || d < static_cast<double>(lo) || d > static_cast<double>(hi)
+        || d != std::floor(d)) {
+        ok = false;
+        return lo;
+    }
+    return static_cast<long>(d);
+}
+
 } // namespace detail
 
 // Load a .nam file at ``path`` into ``out``. Returns false and sets out.error()
@@ -543,6 +578,10 @@ inline bool load_nam(const std::string& path, NamModel& out, std::string* error 
 
     if (!root.isObject()) return fail("top-level JSON is not an object");
 
+    // getString() throws on a non-string value; guard it with isString() so a
+    // file with "architecture": 123 fails the load rather than escaping the loader.
+    if (root.hasObjectMember("architecture") && !root["architecture"].isString())
+        return fail("'architecture' must be a string");
     const std::string architecture =
         root.hasObjectMember("architecture") ? std::string(root["architecture"].getString()) : std::string();
     if (architecture != "WaveNet")

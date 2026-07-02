@@ -118,19 +118,36 @@ public:
         channels_ = channels;
         out_channels_ = out_channels;
         dilations_ = dilations;
-        blocks_.clear();
-        blocks_.resize(dilations.size());
+
+        // Compute the expected weight count from the config arithmetic BEFORE
+        // configuring (allocating) any block. Each block's dilated conv holds
+        // channels·in·2 (+channels bias unless batchnorm) weights, plus 4·channels+1
+        // for its batch-norm; the head holds channels·out+out. Summing this ahead of
+        // the allocation lets a file whose weights array doesn't match be rejected
+        // without first materializing (potentially gigabytes of) block weights. The
+        // per-block arithmetic mirrors ConvNetBlock::weight_count() exactly.
+        const std::size_t ch = static_cast<std::size_t>(channels);
         std::size_t expected = 0;
         for (std::size_t i = 0; i < dilations.size(); ++i) {
-            const int in_ch = i == 0 ? in_channels : channels;
-            blocks_[i].configure(in_ch, channels, dilations[i], batchnorm, act);
-            expected += blocks_[i].weight_count();
+            const std::size_t in_ch = static_cast<std::size_t>(i == 0 ? in_channels : channels);
+            std::size_t block = ch * in_ch * 2u + (batchnorm ? 0u : ch);   // conv W (+bias)
+            if (batchnorm) block += 4u * ch + 1u;                          // batch-norm
+            expected += block;
         }
-        head_.configure(channels, out_channels, /*kernel=*/1, /*dilation=*/1, /*bias=*/true);
-        expected += head_.weight_count();
+        expected += ch * static_cast<std::size_t>(out_channels)           // head W (kernel 1)
+                    + static_cast<std::size_t>(out_channels);             // head b
         if (weights.size() != expected)
             return fail("ConvNet weight count mismatch: file provides " + std::to_string(weights.size())
                         + ", model layout consumes " + std::to_string(expected));
+
+        // Counts agree — now it is safe to allocate the blocks and head.
+        blocks_.clear();
+        blocks_.resize(dilations.size());
+        for (std::size_t i = 0; i < dilations.size(); ++i) {
+            const int in_ch = i == 0 ? in_channels : channels;
+            blocks_[i].configure(in_ch, channels, dilations[i], batchnorm, act);
+        }
+        head_.configure(channels, out_channels, /*kernel=*/1, /*dilation=*/1, /*bias=*/true);
 
         sample_rate_ = sample_rate;
         buf_a_.assign(static_cast<std::size_t>(channels), 0.0f);
@@ -211,6 +228,10 @@ inline bool load_nam_convnet(const std::string& path, NamConvNet& out, std::stri
         return fail(std::string("JSON parse error: ") + e.what());
     }
     if (!root.isObject()) return fail("top-level JSON is not an object");
+    // getString() throws on a non-string value, so guard it with isString():
+    // a file with "architecture": 123 must fail the load, not escape the loader.
+    if (root.hasObjectMember("architecture") && !root["architecture"].isString())
+        return fail("ConvNet: 'architecture' must be a string");
     const std::string arch =
         root.hasObjectMember("architecture") ? std::string(root["architecture"].getString()) : std::string();
     if (arch != "ConvNet") return fail("unsupported architecture: '" + arch + "' (expected ConvNet)");
@@ -218,23 +239,39 @@ inline bool load_nam_convnet(const std::string& path, NamConvNet& out, std::stri
     const choc::value::ValueView config = root["config"];
 
     const double sr = root.hasObjectMember("sample_rate") ? detail::num(root["sample_rate"]) : -1.0;
+    // Integer fields go through detail::parse_int with the runtime's real caps
+    // (mono in/out; channels bounded to the GPU/scratch limit), so a hostile
+    // 1e100 can never drive a UB cast or a pre-validation allocation.
+    bool ints_ok = true;
     const int in_channels = config.hasObjectMember("in_channels")
-                                ? static_cast<int>(detail::num(config["in_channels"])) : 1;
+                                ? static_cast<int>(detail::parse_int(config["in_channels"], 1, 1, ints_ok)) : 1;
     const int out_channels = config.hasObjectMember("out_channels")
-                                 ? static_cast<int>(detail::num(config["out_channels"])) : 1;
-    if (config.hasObjectMember("groups") && static_cast<int>(detail::num(config["groups"])) != 1)
+                                 ? static_cast<int>(detail::parse_int(config["out_channels"], 1, 1, ints_ok)) : 1;
+    // Parse groups over a wide range so a legitimate integer like 2 is read and
+    // rejected with the specific "grouped conv" message, rather than being folded
+    // into the generic malformed-integer error below.
+    if (config.hasObjectMember("groups")
+        && static_cast<int>(detail::parse_int(config["groups"], 1, (1 << 16), ints_ok)) != 1)
         return fail("ConvNet: grouped conv not supported");
     if (!config.hasObjectMember("channels")) return fail("ConvNet: missing 'channels'");
-    const int channels = static_cast<int>(detail::num(config["channels"]));
+    const int channels = static_cast<int>(detail::parse_int(config["channels"], 1, 64, ints_ok));
+    if (!ints_ok)
+        return fail("ConvNet config has an out-of-range or malformed integer field "
+                    "(in_channels/out_channels/groups must be 1; channels 1..64)");
     const bool batchnorm = config.hasObjectMember("batchnorm") && config["batchnorm"].getWithDefault<bool>(false);
 
     if (!config.hasObjectMember("dilations") || !config["dilations"].isArray())
         return fail("ConvNet: 'dilations' must be an array");
     const choc::value::ValueView dil = config["dilations"];
+    // Cap the block count: one block per dilation entry, each allocating a conv,
+    // so an enormous dilations array would otherwise fan out into millions of
+    // block allocations. Real ConvNet captures use a handful of layers.
+    if (dil.size() > 64) return fail("ConvNet: too many layers (dilations > 64)");
     std::vector<int> dilations;
     for (uint32_t i = 0; i < dil.size(); ++i) {
-        const int dv = static_cast<int>(detail::num(dil[i]));
-        if (dv <= 0 || dv > (1 << 16)) return fail("ConvNet: dilation out of range");
+        bool dok = true;
+        const int dv = static_cast<int>(detail::parse_int(dil[i], 1, (1 << 16), dok));
+        if (!dok) return fail("ConvNet: dilation out of range");
         dilations.push_back(dv);
     }
 
@@ -255,7 +292,7 @@ inline bool load_nam_convnet(const std::string& path, NamConvNet& out, std::stri
     weights.reserve(wv.size());
     for (uint32_t i = 0; i < wv.size(); ++i) {
         const double wd = detail::num(wv[i]);
-        if (!std::isfinite(wd)) return fail("ConvNet: non-finite weight");
+        if (!detail::finite_as_float(wd)) return fail("ConvNet: non-finite weight");
         weights.push_back(static_cast<float>(wd));
     }
 
