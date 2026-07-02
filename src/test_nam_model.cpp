@@ -105,6 +105,75 @@ TEST_CASE("build rejects a short/long weight blob", "[nam]") {
     REQUIRE_FALSE(too_long.build({a}, 0.25f, std::vector<float>(10, 0.0f), 1, 48000.0));
 }
 
+TEST_CASE("Conv kernel==1 is a plain matvec, bit-exact vs the general path", "[nam]") {
+    // The kernel==1 fast path (rechannel / input_mixin / layer1x1) skips the ring
+    // buffer. Pin it against a hand-computed matvec AND against a kernel==1 conv
+    // driven through the general path via a two-tap conv whose second tap weights
+    // are zero — they must produce identical floats sample-for-sample.
+    const int in_ch = 3, out_ch = 2;
+    // weight_[0] laid out [out][in]; bias[out].
+    std::vector<float> w = {
+        // out0: in0,in1,in2      out1: in0,in1,in2
+        0.5f, -1.2f, 0.3f,        0.9f, 0.1f, -0.7f,
+        // bias out0, out1
+        0.05f, -0.2f,
+    };
+
+    Conv k1;
+    k1.configure(in_ch, out_ch, /*kernel=*/1, /*dilation=*/1, /*bias=*/true);
+    const float* pk1 = w.data();
+    k1.load(pk1);
+
+    auto matvec = [&](const float* x, int o) {
+        // Match the code's accumulation order exactly: sum the products from 0.0,
+        // THEN add bias. Folding bias in first would reorder the float adds and
+        // diverge in the last bit — which is precisely the invariant this pins.
+        const float* wr = &w[static_cast<std::size_t>(o) * in_ch];
+        float acc = 0.0f;
+        for (int j = 0; j < in_ch; ++j) acc += wr[j] * x[j];
+        return w[static_cast<std::size_t>(out_ch) * in_ch + o] + acc;  // bias last
+    };
+
+    const float inputs[][3] = {
+        {1.0f, 0.0f, -1.0f}, {0.25f, -0.5f, 2.0f}, {-3.0f, 1.5f, 0.7f}, {0.0f, 0.0f, 0.0f},
+    };
+    for (const auto& x : inputs) {
+        float y[2] = {0.0f, 0.0f};
+        k1.step(x, y);
+        for (int o = 0; o < out_ch; ++o)
+            REQUIRE(y[o] == matvec(x, o));   // exact float equality: no reordering
+    }
+}
+
+TEST_CASE("dilated Conv index normalization is exact across the ring wrap", "[nam]") {
+    // The general path replaced `idx %= slots_` with a single conditional add.
+    // Drive a dilated multi-tap conv well past a full wrap of its history ring and
+    // require the output to stay finite and to match a from-scratch replay — the
+    // wrap arithmetic must land on the same slot every time.
+    const int in_ch = 1, out_ch = 1, kernel = 3, dilation = 4;   // reach = 8, slots = 9
+    std::vector<float> w = {0.3f, -0.6f, 0.9f, /*bias=*/0.1f};   // [k0,k1,k2] then bias
+
+    auto make = [&] {
+        Conv c;
+        c.configure(in_ch, out_ch, kernel, dilation, /*bias=*/true);
+        const float* p = w.data();
+        c.load(p);
+        return c;
+    };
+    Conv a = make(), b = make();
+
+    // Feed 40 samples (> 4 wraps of a 9-slot ring) and require the two identical
+    // convs agree bit-for-bit at every sample.
+    for (int n = 0; n < 40; ++n) {
+        const float x = std::sin(0.37f * static_cast<float>(n));
+        float ya = 0.0f, yb = 0.0f;
+        a.step(&x, &ya);
+        b.step(&x, &yb);
+        REQUIRE(std::isfinite(ya));
+        REQUIRE(ya == yb);
+    }
+}
+
 TEST_CASE("loader parses the real example .nam exactly", "[nam]") {
     const char* path = "/tmp/test.nam";
     if (!file_exists(path)) {

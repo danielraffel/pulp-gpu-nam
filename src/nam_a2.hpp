@@ -30,6 +30,7 @@
 
 #include "nam_model.hpp"   // Conv
 
+#include <cassert>
 #include <cmath>
 #include <cstdint>
 #include <fstream>
@@ -243,8 +244,11 @@ public:
 
 private:
     float* layer_scratch() {
-        if (static_cast<int>(layer_scratch_.size()) < channels_)
-            layer_scratch_.assign(static_cast<std::size_t>(channels_), 0.0f);
+        // build() pre-sizes layer_scratch_ to channels_ (RT: never allocate on the
+        // audio thread). Assert rather than lazily grow — a lazy assign() here would
+        // be a heap allocation reachable from process_sample().
+        assert(static_cast<int>(layer_scratch_.size()) >= channels_ &&
+               "layer_scratch_ must be pre-sized by build()");
         return layer_scratch_.data();
     }
 

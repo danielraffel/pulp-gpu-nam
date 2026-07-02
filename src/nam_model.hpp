@@ -99,6 +99,23 @@ public:
 
     // One sample in (in_ch values) -> one sample out (out_ch values).
     void step(const float* x, float* y) {
+        // kernel==1 (rechannel / input_mixin / layer1x1 — the majority of Conv
+        // instances) is a plain matvec over the current input: no tap reaches into
+        // the past, so the ring buffer is never read. Skip the history write and
+        // head bookkeeping entirely. Bit-exact with the general path below, whose
+        // single tap (k=0, back=0) reads the slot we would have just written x into
+        // — i.e. `past[j] == x[j]` — and forms `y[i] = bias + (0 + sum_j w*x)`.
+        if (kernel_ == 1) {
+            const float* wk0 = weight_[0].data();
+            for (int i = 0; i < out_ch_; ++i) {
+                const float* wrow = &wk0[static_cast<std::size_t>(i) * in_ch_];
+                float acc = 0.0f;
+                for (int j = 0; j < in_ch_; ++j) acc += wrow[j] * x[j];
+                y[i] = (has_bias_ ? bias_[static_cast<std::size_t>(i)] : 0.0f) + acc;
+            }
+            return;
+        }
+
         // Write the current input vector into the ring at head_.
         float* cur_slot = &history_[static_cast<std::size_t>(head_) * in_ch_];
         for (int j = 0; j < in_ch_; ++j) cur_slot[j] = x[j];
@@ -107,8 +124,10 @@ public:
 
         for (int k = 0; k < kernel_; ++k) {
             const int back = (kernel_ - 1 - k) * dilation_;   // samples into the past
+            // slots_ == reach_ + 1 and back <= reach_, so head_-back is in
+            // (-slots_, slots_): a single conditional add normalizes it exactly,
+            // no integer divide/modulo per tap. Bit-identical index to `idx %= slots_`.
             int idx = head_ - back;
-            idx %= slots_;
             if (idx < 0) idx += slots_;
             const float* past = &history_[static_cast<std::size_t>(idx) * in_ch_];
             const std::vector<float>& wk = weight_[static_cast<std::size_t>(k)];
