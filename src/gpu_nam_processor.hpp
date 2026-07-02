@@ -35,6 +35,7 @@
 #include "nam_retire_list.hpp"
 #include "gpu_nam_license.hpp"
 #include "nam_runtime.hpp"
+#include "output_calibration.hpp"
 
 // The GPU NAM plugin's engine is WaveNet-specific (the fused GPU forward uploads a
 // NamModel). A build that compiles WaveNet out of the inference substrate cannot
@@ -90,7 +91,12 @@ enum GpuNamParams : state::ParamID {
     kToneTreble         = 9,  // high shelf,0..10 (5 = flat)
     kNoiseGateActive    = 10, // 0 = off, 1 = on
     kEQActive           = 11, // 0 = off (tone stack bypassed), 1 = on
-    kNormalize          = 12, // 0 = off, 1 = normalize output to the model's loudness
+    // Output level handling. Widened from the old binary Normalize (0 = off,
+    // 1 = on): 0 still means Raw (no retarget) and 1 still means Normalized, so a
+    // saved session keeps its meaning; 2 adds Calibrated (retarget the model's
+    // loudness to the user's kCalibrationLevel instead of the fixed reference).
+    kOutputMode         = 12,
+    kCalibrationLevel   = 13, // Calibrated-mode target loudness, dBFS
 };
 
 // Target output loudness (dBFS) the Normalize mode aims for, and the maximum
@@ -156,9 +162,15 @@ public:
                              .range = {0.0f, 1.0f, 1.0f, 1.0f}});
         store.add_parameter({.id = kEQActive, .name = "EQ", .unit = "",
                              .range = {0.0f, 1.0f, 1.0f, 1.0f}});
-        // Off by default so the shipped level is exactly the model's, not retargeted.
-        store.add_parameter({.id = kNormalize, .name = "Normalize", .unit = "",
-                             .range = {0.0f, 1.0f, 0.0f, 0.0f}});
+        // Output mode: 0 = Raw (default; the shipped level is exactly the model's),
+        // 1 = Normalized (retarget the model's loudness to the fixed reference),
+        // 2 = Calibrated (retarget to the user's Cal Level). Stepped 0..2; 0/1 keep
+        // the old binary Normalize meaning so saved sessions are preserved.
+        store.add_parameter({.id = kOutputMode, .name = "Output Mode", .unit = "",
+                             .range = {0.0f, 2.0f, 0.0f, 1.0f}});
+        // Calibrated-mode reference loudness (dBFS); only affects Calibrated mode.
+        store.add_parameter({.id = kCalibrationLevel, .name = "Cal Level", .unit = "dB",
+                             .range = {-36.0f, 0.0f, kNormalizeTargetDb, 0.0f}});
     }
 
     // Total latency, FIXED at prepare() for the prepared lifetime: the re-block
@@ -407,7 +419,7 @@ public:
                                path, err);
         }
         loaded_ok_ = ok;
-        publish_normalize_gain(model, ok);
+        publish_model_loudness(model, ok);
 
         // Pin the internal pipeline to the model's rate and resample the drive in /
         // wet out when the host runs at a different rate. NAM captures are trained
@@ -585,10 +597,22 @@ public:
         const bool bypass = state().get_value(kBypass) >= 0.5f;
         const float mix = bypass ? 0.0f : state().get_value(kMix) / 100.0f;
         const float in_gain = std::pow(10.0f, state().get_value(kInputGain) / 20.0f);
-        // Output make-up gain: the user Output knob, times the Normalize retarget
-        // (unity when Normalize is off or the model has no loudness metadata).
-        const float norm = state().get_value(kNormalize) >= 0.5f
-                               ? normalize_gain_.load(std::memory_order_relaxed) : 1.0f;
+        // Output make-up gain: the user Output knob, times the output-mode retarget
+        // (Raw = unity; Normalized = retarget the model's loudness to the fixed
+        // reference; Calibrated = retarget to the user's Cal Level). Unity whenever
+        // the model carries no loudness metadata. Derived once per block (a single
+        // pow), never per sample.
+        const nam::OutputMode out_mode =
+            nam::output_mode_from_param(state().get_value(kOutputMode));
+        // Acquire the has-flag first so a true flag pairs with the level published
+        // before it (release in publish_model_loudness) — never has=true vs a stale
+        // level.
+        const bool has_loud = model_has_loudness_.load(std::memory_order_acquire);
+        const float loud_db = model_loudness_db_.load(std::memory_order_relaxed);
+        const float norm = nam::output_mode_gain(out_mode, has_loud, loud_db,
+                                                 kNormalizeTargetDb,
+                                                 state().get_value(kCalibrationLevel),
+                                                 kNormalizeMaxAbsDb);
         const float out_gain = std::pow(10.0f, state().get_value(kOutputGain) / 20.0f) * norm;
 
         requested_engine_.store(state().get_value(kEngine) >= 0.5f ? 1 : 0,
@@ -898,19 +922,18 @@ private:
         }
     }
 
-    // Loader-thread only. Derive the linear Normalize gain from the model's
-    // loudness metadata (retarget to kNormalizeTargetDb, clamped to
-    // ±kNormalizeMaxAbsDb) and publish it for the audio thread. Models without
-    // loudness metadata (and any failed load) get unity — Normalize then does
-    // nothing rather than guessing.
-    void publish_normalize_gain(const nam::NamRuntime& model, bool ok) {
-        float gain = 1.0f;
-        if (ok && model.has_loudness()) {
-            float db = kNormalizeTargetDb - static_cast<float>(model.loudness_db());
-            db = std::clamp(db, -kNormalizeMaxAbsDb, kNormalizeMaxAbsDb);
-            gain = std::pow(10.0f, db / 20.0f);
-        }
-        normalize_gain_.store(gain, std::memory_order_relaxed);
+    // Loader-thread only. Publish the model's loudness metadata for the audio
+    // thread; the per-mode output make-up gain (Normalized against the fixed
+    // reference, Calibrated against the user's Cal Level) is derived from it once
+    // per block in process(). Models without loudness metadata (and any failed
+    // load) publish has_loudness=false, so every output mode is a no-op rather than
+    // a guess. Publishes the level before the has-flag so the audio thread never
+    // reads has=true against a stale level.
+    void publish_model_loudness(const nam::NamRuntime& model, bool ok) {
+        const bool has = ok && model.has_loudness();
+        model_loudness_db_.store(has ? static_cast<float>(model.loudness_db()) : 0.0f,
+                                 std::memory_order_relaxed);
+        model_has_loudness_.store(has, std::memory_order_release);
     }
 
     // Worker-thread only. Publish a fresh inline CPU engine for `model`, retiring
@@ -1092,7 +1115,7 @@ private:
                 std::string err;
                 if (nam::load_nam_runtime(path, m, &err)) {
                     loaded_ok_ = true;
-                    publish_normalize_gain(m, true);
+                    publish_model_loudness(m, true);
                     // The internal pipeline rate is pinned at prepare(); a runtime
                     // swap to a model captured at a different rate runs at the pinned
                     // rate (response shifted). Reopen the plugin to re-pin. Matched-
@@ -1260,10 +1283,12 @@ private:
     std::atomic<float> in_level_db_{-120.0f};
     std::atomic<float> out_level_db_{-120.0f};
 
-    // Linear output gain applied when Normalize is on: retargets the loaded model's
-    // metadata loudness to kNormalizeTargetDb. 1.0 (no correction) when the model
-    // has no loudness metadata. Published from the loader thread, read on audio.
-    std::atomic<float> normalize_gain_{1.0f};
+    // The loaded model's loudness metadata, published from the loader thread and
+    // read on the audio thread; the per-mode output make-up gain is derived from
+    // these in process() (see output_calibration.hpp). has_loudness=false means the
+    // model carried no loudness metadata → every output mode is a no-op.
+    std::atomic<bool>  model_has_loudness_{false};
+    std::atomic<float> model_loudness_db_{0.0f};
 };
 
 inline std::unique_ptr<format::Processor> create_gpu_nam() {

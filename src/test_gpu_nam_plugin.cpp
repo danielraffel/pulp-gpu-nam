@@ -581,9 +581,9 @@ TEST_CASE("GPU NAM Normalize retargets output to the model loudness", "[nam][nor
     // Everything else identical — only Normalize toggles — so the per-sample
     // output ratio is exactly the make-up gain and the RMS ratio matches it.
     const auto off = run_cpu(SR, BLOCK, 24, sig,
-                             [](auto& s) { s.set_value(kNormalize, 0.0f); });
+                             [](auto& s) { s.set_value(kOutputMode, 0.0f); });
     const auto on = run_cpu(SR, BLOCK, 24, sig,
-                            [](auto& s) { s.set_value(kNormalize, 1.0f); });
+                            [](auto& s) { s.set_value(kOutputMode, 1.0f); });
     REQUIRE(off.size() == on.size());
 
     double e_on = 0.0, e_off = 0.0;
@@ -596,6 +596,52 @@ TEST_CASE("GPU NAM Normalize retargets output to the model loudness", "[nam][nor
     INFO("ratio=" << ratio << " expected=" << exp_ratio);
     CHECK(std::abs(ratio - exp_ratio) < 0.01 * exp_ratio);
     CHECK(exp_ratio > 1.0);  // this capture is quieter than the target, so it boosts
+}
+
+TEST_CASE("GPU NAM Calibrated retargets to the user reference level", "[nam][normalize][calibrated]") {
+    constexpr std::size_t BLOCK = GpuNamProcessor::kInternalBlock;
+    constexpr double SR = 48000.0;
+
+    // Calibrated mode retargets the model's loudness to the USER's Cal Level
+    // (kCalibrationLevel), not the fixed Normalized reference. Pick a hotter
+    // reference than kNormalizeTargetDb and prove the end-to-end make-up matches
+    // it — and is louder than Normalized would have been.
+    constexpr float kCalLevel = -12.0f;  // hotter than the -18 Normalized target
+    nam::NamRuntime ref;
+    std::string err;
+    REQUIRE(nam::load_nam_runtime(GPU_NAM_DEFAULT_MODEL_PATH, ref, &err));
+    REQUIRE(ref.has_loudness());
+    float exp_db = kCalLevel - static_cast<float>(ref.loudness_db());
+    exp_db = std::clamp(exp_db, -kNormalizeMaxAbsDb, kNormalizeMaxAbsDb);
+    const double exp_ratio = std::pow(10.0f, exp_db / 20.0f);
+
+    std::vector<float> sig(BLOCK);
+    for (std::size_t i = 0; i < BLOCK; ++i)
+        sig[i] = 0.4f * std::sin(0.05f * static_cast<float>(i));
+
+    // Raw baseline vs Calibrated (mode 2) at the user Cal Level.
+    const auto off = run_cpu(SR, BLOCK, 24, sig,
+                             [](auto& s) { s.set_value(kOutputMode, 0.0f); });
+    const auto cal = run_cpu(SR, BLOCK, 24, sig, [](auto& s) {
+        s.set_value(kOutputMode, 2.0f);
+        s.set_value(kCalibrationLevel, kCalLevel);
+    });
+    REQUIRE(off.size() == cal.size());
+
+    double e_cal = 0.0, e_off = 0.0;
+    for (std::size_t i = 0; i < off.size(); ++i) {
+        e_cal += static_cast<double>(cal[i]) * cal[i];
+        e_off += static_cast<double>(off[i]) * off[i];
+    }
+    REQUIRE(e_off > 1e-9);
+    const double ratio = std::sqrt(e_cal / e_off);
+    INFO("cal ratio=" << ratio << " expected=" << exp_ratio);
+    CHECK(std::abs(ratio - exp_ratio) < 0.01 * exp_ratio);
+    // A -12 dBFS reference boosts more than the -18 Normalized target would.
+    const double norm_ratio =
+        std::pow(10.0f, std::clamp(kNormalizeTargetDb - static_cast<float>(ref.loudness_db()),
+                                   -kNormalizeMaxAbsDb, kNormalizeMaxAbsDb) / 20.0f);
+    CHECK(ratio > norm_ratio);
 }
 
 TEST_CASE("GPU NAM resamples around an off-rate host", "[nam][resample]") {
