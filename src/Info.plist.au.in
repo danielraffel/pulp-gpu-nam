@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Custom AU Info.plist so the AudioComponent shows "Pulp: GPU NAM" (not the
+     generated template's "Pulp: GpuNam"). Version fields are substituted from
+     GPU_NAM_VERSION at configure time so they can never drift from the project
+     version — see src/CMakeLists.txt. -->
 <plist version="1.0">
 <dict>
     <key>CFBundleDevelopmentRegion</key>
@@ -15,9 +19,9 @@
     <key>CFBundlePackageType</key>
     <string>BNDL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.2.0</string>
+    <string>@GPU_NAM_VERSION@</string>
     <key>CFBundleVersion</key>
-    <string>1.2.0</string>
+    <string>@GPU_NAM_VERSION@</string>
     <key>AudioComponents</key>
     <array>
         <dict>
@@ -32,7 +36,7 @@
             <key>subtype</key>
             <string>GNam</string>
             <key>version</key>
-            <integer>66048</integer>
+            <integer>@GPU_NAM_AU_VERSION_INT@</integer>
             <key>factoryFunction</key>
             <string>GpuNamAUFactory</string>
             <key>sandboxSafe</key>

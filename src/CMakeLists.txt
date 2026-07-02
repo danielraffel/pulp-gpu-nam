@@ -163,17 +163,50 @@ if(TARGET pulp::render AND TARGET pulp::gpu-audio)
     set(GPU_NAM_MODEL "${CMAKE_CURRENT_SOURCE_DIR}/models/example.nam")
     set(GPU_NAM_ASSETS "${CMAKE_CURRENT_SOURCE_DIR}/assets/nam")
 
+    # Single source of the plugin version. Feeds pulp_add_plugin (VST3/CLAP/AU/
+    # Standalone plists), the custom AU plist (below), and the processor
+    # descriptor (GPU_NAM_VERSION_STRING compile define) so the three can't drift
+    # — the AU plist silently froze at 1.0.0 before this was centralized.
+    set(GPU_NAM_VERSION "1.2.0")
+    add_compile_definitions(GPU_NAM_VERSION_STRING="${GPU_NAM_VERSION}")
+
     pulp_add_plugin(GpuNam
         FORMATS           VST3 AU CLAP Standalone
         SOURCES           gpu_nam_view.cpp
         PLUGIN_NAME       "GpuNam"
         BUNDLE_ID         "com.pulp.gpunam"
         MANUFACTURER      "Pulp"
-        VERSION           "1.2.0"
+        VERSION           "${GPU_NAM_VERSION}"
         CATEGORY          Effect
         PLUGIN_CODE       "GNam"
         MANUFACTURER_CODE "Pulp"
     )
+
+    # The AU needs a custom AudioComponent display name ("Pulp: GPU NAM"), so it
+    # can't use pulp_add_plugin's generated template. Configure the version fields
+    # from GPU_NAM_VERSION and override the AU target's Info.plist, so the custom
+    # plist tracks the project version instead of hardcoding it.
+    if(TARGET GpuNam_AU)
+        string(REPLACE "." ";" _gn_ver_parts "${GPU_NAM_VERSION}")
+        list(LENGTH _gn_ver_parts _gn_ver_len)
+        list(GET _gn_ver_parts 0 _gn_ver_major)
+        set(_gn_ver_minor 0)
+        set(_gn_ver_patch 0)
+        if(_gn_ver_len GREATER 1)
+            list(GET _gn_ver_parts 1 _gn_ver_minor)
+        endif()
+        if(_gn_ver_len GREATER 2)
+            list(GET _gn_ver_parts 2 _gn_ver_patch)
+        endif()
+        math(EXPR GPU_NAM_AU_VERSION_INT
+             "${_gn_ver_major} * 65536 + ${_gn_ver_minor} * 256 + ${_gn_ver_patch}")
+        configure_file(
+            "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.au.in"
+            "${CMAKE_CURRENT_BINARY_DIR}/Info.plist.au"
+            @ONLY)
+        set_target_properties(GpuNam_AU PROPERTIES
+            MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_BINARY_DIR}/Info.plist.au")
+    endif()
 
     # The processor's create_view() + GPU engine pull in the render / gpu-audio /
     # view / canvas / signal stack. Shipped plugin/standalone binaries find their

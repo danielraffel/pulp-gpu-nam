@@ -45,6 +45,13 @@
 #error "GpuNamProcessor requires WaveNet (GPU_NAM_WITH_WAVENET). Build the CPU inference substrate (nam_runtime.hpp) directly for non-WaveNet-only configurations."
 #endif
 
+// Plugin version, injected as a compile define from the single GPU_NAM_VERSION
+// source in src/CMakeLists.txt so the descriptor can't drift from the bundle
+// plists. Falls back for header-only / non-CMake builds.
+#ifndef GPU_NAM_VERSION_STRING
+#define GPU_NAM_VERSION_STRING "0.0.0-dev"
+#endif
+
 #include <pulp/format/processor.hpp>
 #include <pulp/gpu_audio/gpu_audio_transport.hpp>
 #include <pulp/runtime/log.hpp>
@@ -135,7 +142,7 @@ public:
             .name = "GPU NAM",
             .manufacturer = "Pulp",
             .bundle_id = "com.pulp.gpunam",
-            .version = "1.2.0",
+            .version = GPU_NAM_VERSION_STRING,
             .category = format::PluginCategory::Effect,
             .input_buses = {{"Audio In", 2}},
             .output_buses = {{"Audio Out", 2}},
