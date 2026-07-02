@@ -56,6 +56,14 @@ Then rescan plugins in your DAW. A default `example.nam` capture ships inside th
 bundle, so the plugin makes sound immediately; load your own `.nam` from the model
 slot for real amp tones.
 
+**Model & cabinet slots.** Click a slot to open a file picker, or use the
+**‹ / ›** arrows to step through the other captures in the same folder (any
+architecture — WaveNet, ConvNet, Linear, LSTM, or an RTNeural/Keras `.json` — is
+detected automatically as you browse). The right-edge glyph clears the slot: the
+model reverts to the bundled default; the cabinet IR turns off. The IR slot works
+the same way for `.wav`/`.aiff`/`.flac` cabinets and swaps click-free while audio
+runs.
+
 ## Build from source
 
 GPU NAM builds against the Pulp SDK, vendored here as a git submodule at `./pulp`.
