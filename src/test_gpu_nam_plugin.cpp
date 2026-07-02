@@ -266,6 +266,83 @@ std::vector<float> run_stream_cpu_ir(double sr, std::size_t hblock,
     return out;
 }
 
+// Load `model_path` (and optionally `ir_path`) BEFORE prepare() so both are built
+// synchronously and active on the first block, then stream `sig` through the full
+// CPU-engine processor with the noise gate OFF (so the check measures the model +
+// IR path, not gating). Returns channel-0 output with reported latency trimmed.
+std::vector<float> run_stream_cpu_model_ir(double sr, std::size_t hblock,
+                                           const std::vector<float>& sig,
+                                           const std::string& model_path,
+                                           const std::string& ir_path) {
+    GpuNamProcessor proc;
+    pulp::state::StateStore store;
+    proc.set_state_store(&store);
+    proc.define_parameters(store);
+    store.set_value(kInputGain, 0.0f);
+    store.set_value(kOutputGain, 0.0f);
+    store.set_value(kMix, 100.0f);
+    store.set_value(kBypass, 0.0f);
+    store.set_value(kEngine, 0.0f);
+    store.set_value(kNoiseGateActive, 0.0f);
+    if (!model_path.empty()) proc.load_model(model_path);
+    if (!ir_path.empty()) proc.load_ir(ir_path);
+    pulp::format::PrepareContext ctx;
+    ctx.sample_rate = sr;
+    ctx.max_buffer_size = static_cast<int>(hblock);
+    ctx.input_channels = 2;
+    ctx.output_channels = 2;
+    proc.prepare(ctx);
+    std::vector<float> out;
+    out.reserve(sig.size());
+    std::vector<float> in_l(hblock), in_r(hblock), out_l(hblock), out_r(hblock);
+    pulp::midi::MidiBuffer mi, mo;
+    pulp::format::ProcessContext pctx;
+    pctx.sample_rate = sr;
+    for (std::size_t off = 0; off < sig.size(); off += hblock) {
+        const std::size_t n = std::min(hblock, sig.size() - off);
+        for (std::size_t i = 0; i < n; ++i) in_l[i] = in_r[i] = sig[off + i];
+        const float* ip[2] = {in_l.data(), in_r.data()};
+        float* op[2] = {out_l.data(), out_r.data()};
+        pulp::audio::BufferView<const float> iv(ip, 2, n);
+        pulp::audio::BufferView<float> ov(op, 2, n);
+        pctx.num_samples = static_cast<int>(n);
+        proc.process(ov, iv, mi, mo, pctx);
+        for (std::size_t i = 0; i < n; ++i) out.push_back(out_l[i]);
+    }
+    const int lat = proc.latency_samples();
+    proc.release();
+    if (lat > 0 && static_cast<std::size_t>(lat) < out.size())
+        out.erase(out.begin(), out.begin() + lat);
+    return out;
+}
+
+double signal_rms(const std::vector<float>& v) {
+    if (v.empty()) return 0.0;
+    double acc = 0.0;
+    for (float x : v) acc += static_cast<double>(x) * static_cast<double>(x);
+    return std::sqrt(acc / static_cast<double>(v.size()));
+}
+
+bool all_finite(const std::vector<float>& v) {
+    for (float x : v)
+        if (!std::isfinite(x)) return false;
+    return true;
+}
+
+// A guitar-like drive: a 220 Hz tone with light 2nd/3rd harmonics at ~0.4 peak, so
+// a real amp model has something to shape and the (disabled) gate is irrelevant.
+std::vector<float> drive_signal(double sr, std::size_t n) {
+    std::vector<float> s(n);
+    const double w = 2.0 * 3.14159265358979323846 * 220.0 / sr;
+    for (std::size_t i = 0; i < n; ++i) {
+        const double t = static_cast<double>(i);
+        s[i] = static_cast<float>(0.4 * (std::sin(w * t)
+                                         + 0.2 * std::sin(2.0 * w * t)
+                                         + 0.1 * std::sin(3.0 * w * t)));
+    }
+    return s;
+}
+
 }  // namespace
 
 TEST_CASE("GPU NAM CPU engine produces finite non-trivial amped output", "[nam]") {
@@ -871,4 +948,131 @@ TEST_CASE("GPU NAM clear resets the model + IR slots", "[nam][browse]") {
     // still leave it false and not crash.
     proc.clear_ir();
     CHECK_FALSE(proc.user_ir_loaded());
+}
+
+// End-to-end proof that each real model capture in src/models/ loads through the
+// full processor and passes audio: finite, non-silent, and materially reshaped vs
+// the dry input. This is the regression guard that a loader-hardening change never
+// silently rejects (or mis-loads) a legitimate real .nam file.
+TEST_CASE("GPU NAM streams real model captures end-to-end", "[nam][e2e]") {
+    namespace fs = std::filesystem;
+    constexpr double SR = 48000.0;
+    const std::size_t N = 4096;
+    const auto dry = drive_signal(SR, N);
+    const double dry_rms = signal_rms(dry);
+
+    struct Fixture { const char* file; nam::NamRuntime::Arch arch; const char* name; };
+    const Fixture fixtures[] = {
+        {"example.nam", nam::NamRuntime::Arch::WaveNet, "WaveNet"},
+        {"wavenet_a1_standard.nam", nam::NamRuntime::Arch::WaveNet, "WaveNet"},
+        {"lstm.nam", nam::NamRuntime::Arch::Lstm, "LSTM"},
+    };
+
+    for (const auto& fx : fixtures) {
+        const std::string path = (fs::path(GPU_NAM_MODELS_DIR) / fx.file).string();
+        if (!fs::exists(path)) {
+            WARN("missing real fixture " << path << "; skipping");
+            continue;
+        }
+        INFO("model = " << fx.file);
+
+        // The loader must accept it and classify the architecture we expect.
+        nam::NamRuntime probe;
+        std::string err;
+        REQUIRE(nam::load_nam_runtime(path, probe, &err));
+        CHECK(probe.arch() == fx.arch);
+
+        // Full-processor audio must come out finite, audible, and changed by the amp.
+        const auto wet = run_stream_cpu_model_ir(SR, 512, dry, path, /*ir=*/std::string());
+        REQUIRE(all_finite(wet));
+        REQUIRE(wet.size() > N / 2);
+        const double wet_rms = signal_rms(wet);
+        CHECK(wet_rms > 1e-4);                                  // not silent
+        // The amp reshapes the tone: the trimmed output is not a bit-copy of the dry
+        // input over the overlapping region.
+        bool differs = false;
+        const std::size_t cmp = std::min(wet.size(), dry.size());
+        for (std::size_t i = 0; i < cmp; ++i)
+            if (std::abs(wet[i] - dry[i]) > 1e-5f) { differs = true; break; }
+        CHECK(differs);
+        INFO("dry_rms=" << dry_rms << " wet_rms=" << wet_rms);
+    }
+}
+
+// End-to-end proof that a real impulse response (src/models/cabinet.wav) loads via
+// the plugin's IR reader and colors the amped signal: with the cab engaged the
+// output stays finite and non-silent and differs from the no-IR amped tone.
+TEST_CASE("GPU NAM streams a real IR end-to-end", "[nam][e2e][ir]") {
+    namespace fs = std::filesystem;
+    constexpr double SR = 48000.0;
+    const std::size_t N = 4096;
+
+    const std::string model = (fs::path(GPU_NAM_MODELS_DIR) / "example.nam").string();
+    const std::string ir = (fs::path(GPU_NAM_MODELS_DIR) / "cabinet.wav").string();
+    if (!fs::exists(model) || !fs::exists(ir)) {
+        WARN("missing real model/IR fixture; skipping");
+        return;
+    }
+
+    const auto dry = drive_signal(SR, N);
+    const auto no_ir = run_stream_cpu_model_ir(SR, 512, dry, model, std::string());
+    const auto with_ir = run_stream_cpu_model_ir(SR, 512, dry, model, ir);
+
+    REQUIRE(all_finite(with_ir));
+    REQUIRE(with_ir.size() > N / 2);
+    CHECK(signal_rms(with_ir) > 1e-4);                         // cab output is audible
+
+    // The cabinet must actually change the tone relative to the amp-only signal.
+    const std::size_t cmp = std::min(no_ir.size(), with_ir.size());
+    REQUIRE(cmp > 0);
+    double diff = 0.0;
+    for (std::size_t i = 0; i < cmp; ++i)
+        diff += std::abs(static_cast<double>(with_ir[i]) - static_cast<double>(no_ir[i]));
+    CHECK(diff / static_cast<double>(cmp) > 1e-4);             // IR colors the signal
+}
+
+// The processor's CPU engine handles every supported architecture, not just the
+// two we ship real captures for. Build a valid ConvNet and a valid Linear capture,
+// stream them through the full processor, and require finite, non-silent, reshaped
+// audio — so a loader change to any arch is caught end-to-end, not just in a unit.
+TEST_CASE("GPU NAM streams ConvNet and Linear captures end-to-end", "[nam][e2e]") {
+    namespace fs = std::filesystem;
+    constexpr double SR = 48000.0;
+    const std::size_t N = 4096;
+    const auto dry = drive_signal(SR, N);
+
+    auto stream_and_check = [&](const std::string& json, const char* tag,
+                                nam::NamRuntime::Arch arch) {
+        INFO("arch = " << tag);
+        const auto path = (fs::temp_directory_path() / (std::string("gpu_nam_e2e_") + tag + ".nam")).string();
+        std::ofstream(path, std::ios::binary) << json;
+        nam::NamRuntime probe;
+        std::string err;
+        REQUIRE(nam::load_nam_runtime(path, probe, &err));
+        CHECK(probe.arch() == arch);
+        const auto wet = run_stream_cpu_model_ir(SR, 512, dry, path, std::string());
+        REQUIRE(all_finite(wet));
+        CHECK(signal_rms(wet) > 1e-4);
+        bool differs = false;
+        const std::size_t cmp = std::min(wet.size(), dry.size());
+        for (std::size_t i = 0; i < cmp; ++i)
+            if (std::abs(wet[i] - dry[i]) > 1e-5f) { differs = true; break; }
+        CHECK(differs);
+        fs::remove(path);
+    };
+
+    // ConvNet: 1 channel, one dilation-1 block (ReLU), 1x1 head. Weights are
+    // conv(1*1*2 + bias) then head(1*1 + bias) = 5 floats.
+    const std::string convnet =
+        "{\"architecture\":\"ConvNet\",\"sample_rate\":48000,\"config\":{"
+        "\"channels\":1,\"dilations\":[1],\"batchnorm\":false,\"activation\":\"ReLU\","
+        "\"in_channels\":1,\"out_channels\":1},\"weights\":[1.0,2.0,0.5,1.0,0.0]}";
+    stream_and_check(convnet, "convnet", nam::NamRuntime::Arch::ConvNet);
+
+    // Linear: a 1-tap FIR with bias — output = 0.1 + 0.5*x. Weights are rf(1)+bias(1).
+    const std::string linear =
+        "{\"architecture\":\"Linear\",\"sample_rate\":48000,\"config\":{"
+        "\"receptive_field\":1,\"bias\":true,\"in_channels\":1,\"out_channels\":1},"
+        "\"weights\":[0.5,0.1]}";
+    stream_and_check(linear, "linear", nam::NamRuntime::Arch::Linear);
 }

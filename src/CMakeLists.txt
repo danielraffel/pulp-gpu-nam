@@ -258,6 +258,7 @@ if(TARGET pulp::render AND TARGET pulp::gpu-audio)
         target_include_directories(gpu-nam-plugin-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
         target_compile_definitions(gpu-nam-plugin-test PRIVATE
             GPU_NAM_DEFAULT_MODEL_PATH="${GPU_NAM_MODEL}"
+            GPU_NAM_MODELS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/models"
             GPU_NAM_ASSET_DIR="${GPU_NAM_ASSETS}")
         catch_discover_tests(gpu-nam-plugin-test)
 

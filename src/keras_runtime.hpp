@@ -25,6 +25,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <fstream>
 #include <memory>
 #include <sstream>
@@ -311,6 +312,17 @@ private:
 
 namespace detail {
 
+// True iff `d` survives narrowing to the stored float. std::isfinite on the double
+// alone is insufficient: a finite but out-of-range magnitude (e.g. 1e300) passes
+// isfinite yet overflows to ±inf when cast to float (an out-of-range double→float
+// cast is itself UB). Bounding by FLT_MAX first rejects such a weight before the
+// cast, so a hostile file can't slip a value that becomes inf/NaN in the state.
+inline bool finite_as_float(double d) {
+    return std::isfinite(d)
+           && d <= static_cast<double>(std::numeric_limits<float>::max())
+           && d >= static_cast<double>(std::numeric_limits<float>::lowest());
+}
+
 inline int shape_last(const choc::value::ValueView& shape) {
     if (!shape.isArray() || shape.size() == 0) return -1;
     const choc::value::ValueView last = shape[shape.size() - 1];
@@ -318,19 +330,26 @@ inline int shape_last(const choc::value::ValueView& shape) {
     return static_cast<int>(last.getWithDefault<double>(0.0));
 }
 
-inline std::vector<float> to_vec(const choc::value::ValueView& a) {
+// When `ok` is supplied, it is cleared on any non-finite entry: one inf/NaN weight
+// drives the recurrent (h,c) state to a permanent NaN that no later sample flushes,
+// so the caller rejects the whole file. Passing nullptr keeps the prior behavior.
+inline std::vector<float> to_vec(const choc::value::ValueView& a, bool* ok = nullptr) {
     std::vector<float> v;
     if (!a.isArray()) return v;
     v.reserve(a.size());
-    for (uint32_t i = 0; i < a.size(); ++i) v.push_back(static_cast<float>(a[i].getWithDefault<double>(0.0)));
+    for (uint32_t i = 0; i < a.size(); ++i) {
+        const double d = a[i].getWithDefault<double>(0.0);
+        if (ok && !finite_as_float(d)) *ok = false;
+        v.push_back(static_cast<float>(finite_as_float(d) ? d : 0.0));
+    }
     return v;
 }
 
-inline std::vector<std::vector<float>> to_mat(const choc::value::ValueView& a) {
+inline std::vector<std::vector<float>> to_mat(const choc::value::ValueView& a, bool* ok = nullptr) {
     std::vector<std::vector<float>> m;
     if (!a.isArray()) return m;
     m.reserve(a.size());
-    for (uint32_t i = 0; i < a.size(); ++i) m.push_back(to_vec(a[i]));
+    for (uint32_t i = 0; i < a.size(); ++i) m.push_back(to_vec(a[i], ok));
     return m;
 }
 
@@ -407,7 +426,13 @@ inline bool load_keras_model(const std::string& path, KerasModel& out, std::stri
         const choc::value::ValueView L = layers[li];
         if (!L.isObject() || !L.hasObjectMember("type"))
             return fail("Keras: layer " + ix + " missing 'type'");
+        // getString() throws on a non-string; a layer with "type": 5 must fail the
+        // load rather than escape the loader thread as an uncaught choc error.
+        if (!L["type"].isString())
+            return fail("Keras: layer " + ix + " 'type' must be a string");
         const std::string type = std::string(L["type"].getString());
+        // Cleared by to_vec/to_mat below if any weight in this layer is non-finite.
+        bool wok = true;
         const int out_size = L.hasObjectMember("shape") ? detail::shape_last(L["shape"]) : -1;
         if (out_size <= 0) return fail("Keras: layer " + ix + " invalid 'shape'");
         if (out_size > kMaxKerasWidth) return fail("Keras: layer " + ix + " width too large");
@@ -432,8 +457,9 @@ inline bool load_keras_model(const std::string& path, KerasModel& out, std::stri
                 return fail("Keras: GRU layer " + ix + " needs 3 weight sets");
             if (!recurrent_act_ok())
                 return fail("Keras: GRU layer " + ix + " unsupported activation '" + act + "'");
-            const auto kernel = detail::to_mat(w[0]), recurrent = detail::to_mat(w[1]),
-                       bias = detail::to_mat(w[2]);
+            const auto kernel = detail::to_mat(w[0], &wok), recurrent = detail::to_mat(w[1], &wok),
+                       bias = detail::to_mat(w[2], &wok);
+            if (!wok) return fail("Keras: GRU layer " + ix + " has a non-finite weight");
             if (!detail::mat_shape(kernel, cur_in, 3 * out_size)
                 || !detail::mat_shape(recurrent, out_size, 3 * out_size)
                 || !detail::mat_shape(bias, 2, 3 * out_size))
@@ -446,8 +472,9 @@ inline bool load_keras_model(const std::string& path, KerasModel& out, std::stri
                 return fail("Keras: LSTM layer " + ix + " needs 3 weight sets");
             if (!recurrent_act_ok())
                 return fail("Keras: LSTM layer " + ix + " unsupported activation '" + act + "'");
-            const auto kernel = detail::to_mat(w[0]), recurrent = detail::to_mat(w[1]);
-            const auto bias = detail::to_vec(w[2]);
+            const auto kernel = detail::to_mat(w[0], &wok), recurrent = detail::to_mat(w[1], &wok);
+            const auto bias = detail::to_vec(w[2], &wok);
+            if (!wok) return fail("Keras: LSTM layer " + ix + " has a non-finite weight");
             if (!detail::mat_shape(kernel, cur_in, 4 * out_size)
                 || !detail::mat_shape(recurrent, out_size, 4 * out_size)
                 || static_cast<int>(bias.size()) < 4 * out_size)
@@ -468,15 +495,16 @@ inline bool load_keras_model(const std::string& path, KerasModel& out, std::stri
             std::string aerr;
             const Activation a = strict_act(&aerr);
             if (!aerr.empty()) return fail(aerr);
-            const auto kernel = detail::to_mat(w[0]);
+            const auto kernel = detail::to_mat(w[0], &wok);
             if (!detail::mat_shape(kernel, cur_in, out_size))
                 return fail("Keras: Dense layer " + ix + " kernel shape mismatch");
             std::vector<float> bias;
             if (w.size() >= 2) {
-                bias = detail::to_vec(w[1]);
+                bias = detail::to_vec(w[1], &wok);
                 if (static_cast<int>(bias.size()) < out_size)
                     return fail("Keras: Dense layer " + ix + " bias too short");
             }
+            if (!wok) return fail("Keras: Dense layer " + ix + " has a non-finite weight");
             auto d = std::make_unique<KerasDense>(cur_in, out_size, a);
             d->load(kernel, bias);
             out.layers_.push_back(std::move(d));

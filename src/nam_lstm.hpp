@@ -51,6 +51,8 @@
 
 #include <choc/text/choc_JSON.h>
 
+#include "nam_model.hpp"   // detail::num, detail::parse_int (shared loader helpers)
+
 namespace pulp::examples::nam {
 
 // One LSTM cell: standard forward with the NAM weight layout. Stateful — carries
@@ -165,13 +167,20 @@ public:
             return false;
         }
 
-        cells_.clear();
-        cells_.resize(static_cast<std::size_t>(num_layers_));
-        for (int l = 0; l < num_layers_; ++l)
-            cells_[static_cast<std::size_t>(l)].configure(l == 0 ? input_size_ : hidden_size_, hidden_size_);
-
+        // Compute the expected weight count from the config arithmetic BEFORE
+        // allocating any cell. Each cell's weights are 4h·(in+h) + 4h + 2h floats;
+        // configuring the cells first would allocate that (up to gigabytes for a
+        // large hidden_size) before we could reject a file whose weights array
+        // doesn't match. Same total as summing LstmCell::weight_count(), just
+        // hoisted ahead of the allocation.
         std::size_t expected = 0;
-        for (const LstmCell& c : cells_) expected += c.weight_count();
+        for (int l = 0; l < num_layers_; ++l) {
+            const std::size_t in = static_cast<std::size_t>(l == 0 ? input_size_ : hidden_size_);
+            const std::size_t h = static_cast<std::size_t>(hidden_size_);
+            const std::size_t rows = 4u * h;
+            const std::size_t cols = in + h;
+            expected += rows * cols + rows + 2u * h;   // W + b + h0 + c0
+        }
         expected += static_cast<std::size_t>(out_size_) * static_cast<std::size_t>(hidden_size_)  // head W
                     + static_cast<std::size_t>(out_size_);                                          // head b
         expected_weight_count_ = expected;
@@ -181,6 +190,12 @@ public:
                      + " floats, model layout consumes " + std::to_string(expected);
             return false;
         }
+
+        // Counts agree — now it is safe to allocate the cells.
+        cells_.clear();
+        cells_.resize(static_cast<std::size_t>(num_layers_));
+        for (int l = 0; l < num_layers_; ++l)
+            cells_[static_cast<std::size_t>(l)].configure(l == 0 ? input_size_ : hidden_size_, hidden_size_);
 
         const float* p = weights_.data();
         for (LstmCell& c : cells_) c.load(p);
@@ -284,34 +299,40 @@ inline bool load_nam_lstm(const std::string& path, NamLstmModel& out, std::strin
     if (!root.hasObjectMember("config")) return fail("missing 'config'");
     const choc::value::ValueView config = root["config"];
 
-    auto num = [](const choc::value::ValueView& v) -> double {
-        if (v.isInt64()) return static_cast<double>(v.getInt64());
-        if (v.isInt32()) return static_cast<double>(v.getInt32());
-        if (v.isFloat64()) return v.getFloat64();
-        if (v.isFloat32()) return static_cast<double>(v.getFloat32());
-        return v.getWithDefault<double>(0.0);
-    };
-
+    // Every integer field is routed through detail::parse_int: a non-finite,
+    // fractional, out-of-range (1e100 → UB cast), or wrong-typed value fails the
+    // load instead of driving an unchecked cast or a pre-validation allocation.
+    // Caps mirror the runtime's real limits (mono input; hidden/layers bounded).
+    bool ints_ok = true;
     const int input_size = config.hasObjectMember("input_size")
-                               ? static_cast<int>(num(config["input_size"])) : 1;
+                               ? static_cast<int>(detail::parse_int(config["input_size"], 1, 1, ints_ok)) : 1;
     const int hidden_size = config.hasObjectMember("hidden_size")
-                                ? static_cast<int>(num(config["hidden_size"])) : 0;
+                                ? static_cast<int>(detail::parse_int(config["hidden_size"], 1, 4096, ints_ok)) : 0;
     const int num_layers = config.hasObjectMember("num_layers")
-                               ? static_cast<int>(num(config["num_layers"])) : 0;
+                               ? static_cast<int>(detail::parse_int(config["num_layers"], 1, 16, ints_ok)) : 0;
     // NAM LSTM captures are mono in/out; the head maps to one audio channel.
     const int out_channels = 1;
+    if (!ints_ok)
+        return fail("LSTM config has an out-of-range or malformed integer field "
+                    "(input_size must be 1; hidden_size 1..4096; num_layers 1..16)");
     if (hidden_size <= 0 || num_layers <= 0)
         return fail("LSTM config needs positive hidden_size and num_layers");
 
     const double sample_rate =
-        root.hasObjectMember("sample_rate") ? num(root["sample_rate"]) : -1.0;
+        root.hasObjectMember("sample_rate") ? detail::num(root["sample_rate"]) : -1.0;
 
     if (!root.hasObjectMember("weights")) return fail("missing 'weights'");
     const choc::value::ValueView wv = root["weights"];
     if (!wv.isArray()) return fail("'weights' must be an array");
     std::vector<float> weights;
     weights.reserve(wv.size());
-    for (uint32_t i = 0; i < wv.size(); ++i) weights.push_back(static_cast<float>(num(wv[i])));
+    for (uint32_t i = 0; i < wv.size(); ++i) {
+        const double wd = detail::num(wv[i]);
+        // A single non-finite weight poisons the recurrent (h,c) state into a
+        // permanent NaN that no later sample can flush — reject the file instead.
+        if (!detail::finite_as_float(wd)) return fail("LSTM: non-finite weight");
+        weights.push_back(static_cast<float>(wd));
+    }
 
     const bool ok = out.build(input_size, hidden_size, num_layers, out_channels,
                               std::move(weights), sample_rate);

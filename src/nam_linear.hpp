@@ -15,6 +15,7 @@
 // the faithful oracle, and small captures are the only ones seen in practice.
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <fstream>
 #include <sstream>
@@ -22,6 +23,8 @@
 #include <vector>
 
 #include <choc/text/choc_JSON.h>
+
+#include "nam_model.hpp"   // detail::num, detail::parse_int (shared loader helpers)
 
 namespace pulp::examples::nam {
 
@@ -125,38 +128,49 @@ inline bool load_nam_linear(const std::string& path, NamLinearModel& out,
     } catch (const std::exception& e) {
         return fail(std::string("JSON parse error: ") + e.what());
     }
-    if (root.isObject() && root.hasObjectMember("architecture")
-        && std::string(root["architecture"].getString()) != "Linear")
-        return fail("not a Linear model (architecture='"
-                    + std::string(root["architecture"].getString()) + "')");
+    // getString() throws on a non-string value; guard it with isString() so a
+    // file with "architecture": 5 fails the load rather than escaping the loader.
+    if (root.isObject() && root.hasObjectMember("architecture")) {
+        if (!root["architecture"].isString())
+            return fail("Linear: 'architecture' must be a string");
+        if (std::string(root["architecture"].getString()) != "Linear")
+            return fail("not a Linear model (architecture='"
+                        + std::string(root["architecture"].getString()) + "')");
+    }
     if (!root.hasObjectMember("config")) return fail("missing 'config'");
     const choc::value::ValueView config = root["config"];
 
-    auto num = [](const choc::value::ValueView& v) -> double {
-        if (v.isInt64()) return static_cast<double>(v.getInt64());
-        if (v.isFloat64()) return v.getFloat64();
-        return v.getWithDefault<double>(0.0);
-    };
-
     if (!config.hasObjectMember("receptive_field"))
         return fail("Linear: missing config.receptive_field");
-    const int receptive_field = static_cast<int>(num(config["receptive_field"]));
+    // receptive_field is the per-sample tap count — a well-formed but enormous
+    // value (e.g. 5M taps) loads fine and then costs hundreds of GFLOP/s on the
+    // audio thread. Cap it (and the channel counts) via detail::parse_int, which
+    // also rejects the UB-cast and fractional/mistyped cases.
+    bool ints_ok = true;
+    const int receptive_field =
+        static_cast<int>(detail::parse_int(config["receptive_field"], 1, (1 << 20), ints_ok));
     const bool bias = config.hasObjectMember("bias")
                           && config["bias"].getWithDefault<bool>(false);
     const int in_channels = config.hasObjectMember("in_channels")
-                                ? static_cast<int>(num(config["in_channels"])) : 1;
+                                ? static_cast<int>(detail::parse_int(config["in_channels"], 1, 1, ints_ok)) : 1;
     const int out_channels = config.hasObjectMember("out_channels")
-                                 ? static_cast<int>(num(config["out_channels"])) : 1;
+                                 ? static_cast<int>(detail::parse_int(config["out_channels"], 1, 1, ints_ok)) : 1;
+    if (!ints_ok)
+        return fail("Linear config has an out-of-range or malformed integer field "
+                    "(receptive_field 1..1048576; in_channels/out_channels must be 1)");
     const double sample_rate =
-        root.hasObjectMember("sample_rate") ? num(root["sample_rate"]) : -1.0;
+        root.hasObjectMember("sample_rate") ? detail::num(root["sample_rate"]) : -1.0;
 
     if (!root.hasObjectMember("weights")) return fail("missing 'weights'");
     const choc::value::ValueView wv = root["weights"];
     if (!wv.isArray()) return fail("'weights' must be an array");
     std::vector<float> weights;
     weights.reserve(wv.size());
-    for (uint32_t i = 0; i < wv.size(); ++i)
-        weights.push_back(static_cast<float>(num(wv[i])));
+    for (uint32_t i = 0; i < wv.size(); ++i) {
+        const double wd = detail::num(wv[i]);
+        if (!detail::finite_as_float(wd)) return fail("Linear: non-finite weight");
+        weights.push_back(static_cast<float>(wd));
+    }
 
     if (!out.build(receptive_field, bias, in_channels, out_channels,
                    std::move(weights), sample_rate))

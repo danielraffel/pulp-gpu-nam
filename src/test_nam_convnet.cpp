@@ -137,3 +137,60 @@ TEST_CASE("ConvNet rejects unsupported shapes", "[nam][convnet]") {
         CHECK_FALSE(m.build(1, 2, 1, {1}, false, Activation::ReLU, {1, 2, 0.5f, 1, 0}, 48000.0, &e));
     }
 }
+
+TEST_CASE("ConvNet loader rejects hostile metadata without allocating", "[nam][convnet][robustness]") {
+    NamConvNet m;
+    std::string e;
+
+    // A 200-byte file with a colossal `channels` must be rejected at parse — not
+    // turned into an 80 GB block allocation. parse_int caps it well before build().
+    {
+        std::string j = convnet_json(1, {1}, false, "ReLU", {1, 2, 0.5f, 1, 0});
+        j.replace(j.find("\"channels\":1"), std::string("\"channels\":1").size(), "\"channels\":100000");
+        const std::string path = write_temp("gpu_nam_convnet_bigch.nam", j);
+        CHECK_FALSE(load_nam_convnet(path, m, &e));
+        CHECK_THAT(e, ContainsSubstring("out-of-range or malformed"));
+        std::filesystem::remove(path);
+    }
+    // 1e100 in an integer field is undefined to cast to int — parse_int rejects it.
+    {
+        std::string j = convnet_json(4, {1}, false, "ReLU", {1, 2, 0.5f, 1, 0});
+        j.replace(j.find("\"channels\":4"), std::string("\"channels\":4").size(), "\"channels\":1e100");
+        const std::string path = write_temp("gpu_nam_convnet_ubint.nam", j);
+        CHECK_FALSE(load_nam_convnet(path, m, &e));
+        std::filesystem::remove(path);
+    }
+    // A non-string architecture must fail the load, not throw out of the loader.
+    {
+        std::string j = convnet_json(1, {1}, false, "ReLU", {1, 2, 0.5f, 1, 0});
+        j.replace(j.find("\"architecture\":\"ConvNet\""),
+                  std::string("\"architecture\":\"ConvNet\"").size(), "\"architecture\":123");
+        const std::string path = write_temp("gpu_nam_convnet_archnum.nam", j);
+        CHECK_FALSE(load_nam_convnet(path, m, &e));
+        CHECK_THAT(e, ContainsSubstring("architecture"));
+        std::filesystem::remove(path);
+    }
+    // An enormous dilations array would fan out into millions of blocks — cap it.
+    {
+        std::vector<int> many(200, 1);
+        std::string j = convnet_json(1, many, false, "ReLU", {1, 2, 0.5f, 1, 0});
+        const std::string path = write_temp("gpu_nam_convnet_manylayers.nam", j);
+        CHECK_FALSE(load_nam_convnet(path, m, &e));
+        CHECK_THAT(e, ContainsSubstring("too many layers"));
+        std::filesystem::remove(path);
+    }
+    // A weight that is a finite double but overflows float (1e300) must be
+    // rejected: casting it to float yields ±inf, which would poison the network.
+    // Guarding on isfinite(double) alone would miss this — the loader bounds by
+    // FLT_MAX before the narrowing cast.
+    {
+        std::string j =
+            "{\"architecture\":\"ConvNet\",\"sample_rate\":48000,\"config\":{"
+            "\"channels\":1,\"dilations\":[1],\"batchnorm\":false,\"activation\":\"ReLU\","
+            "\"in_channels\":1,\"out_channels\":1},\"weights\":[1.0,2.0,1e300,1.0,0.0]}";
+        const std::string path = write_temp("gpu_nam_convnet_ovfw.nam", j);
+        CHECK_FALSE(load_nam_convnet(path, m, &e));
+        CHECK_THAT(e, ContainsSubstring("non-finite weight"));
+        std::filesystem::remove(path);
+    }
+}

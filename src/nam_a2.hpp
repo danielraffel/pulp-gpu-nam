@@ -337,7 +337,8 @@ inline bool parse_submodel(const choc::value::ValueView& model, A2ArrayConfig& a
     auto fail = [&](const std::string& m) { if (error) *error = m; return false; };
     if (!model.isObject()) return fail("A2: submodel is not an object");
     const std::string arch =
-        model.hasObjectMember("architecture") ? std::string(model["architecture"].getString()) : std::string();
+        (model.hasObjectMember("architecture") && model["architecture"].isString())
+            ? std::string(model["architecture"].getString()) : std::string();
     if (arch != "WaveNet") return fail("A2: submodel architecture '" + arch + "' (expected WaveNet)");
     if (!model.hasObjectMember("config")) return fail("A2: submodel missing 'config'");
     const choc::value::ValueView config = model["config"];
@@ -506,7 +507,8 @@ public:
         if (!root.isObject()) return fail("A2: top-level JSON is not an object");
         sr_ = root.hasObjectMember("sample_rate") ? detail::num(root["sample_rate"]) : -1.0;
         const std::string arch =
-            root.hasObjectMember("architecture") ? std::string(root["architecture"].getString()) : std::string();
+            (root.hasObjectMember("architecture") && root["architecture"].isString())
+            ? std::string(root["architecture"].getString()) : std::string();
 
         if (arch == "SlimmableContainer") {
             if (!root.hasObjectMember("config") || !root["config"].isObject())
@@ -613,7 +615,8 @@ inline bool load_nam_a2(const std::string& path, NamA2& out, std::string* error 
 inline bool is_nam_a2(const choc::value::ValueView& root) {
     if (!root.isObject()) return false;
     const std::string arch =
-        root.hasObjectMember("architecture") ? std::string(root["architecture"].getString()) : std::string();
+        (root.hasObjectMember("architecture") && root["architecture"].isString())
+            ? std::string(root["architecture"].getString()) : std::string();
     if (arch == "SlimmableContainer") return true;
     if (arch == "WaveNet" && root.hasObjectMember("config"))
         return detail_a2::looks_like_a2(root["config"]);
