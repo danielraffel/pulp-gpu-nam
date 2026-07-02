@@ -1067,8 +1067,13 @@ private:
     // Adding the first IR / removing the last go straight through ir_active_ (an
     // expected timbral change, no crossfade).
     void apply_ir(std::size_t ch, float* buf) {
-        IrEngine* prev = ir_prev_.load(std::memory_order_seq_cst);
+        // Load cur (the flag) BEFORE prev (the data): the worker publishes prev then
+        // cur, so reading cur first guarantees that observing the post-swap cur also
+        // observes the non-null prev — otherwise a callback could see the new engine
+        // with prev still null and run it at full gain for one block (the very click
+        // the crossfade removes).
         IrEngine* cur  = ir_active_.load(std::memory_order_seq_cst);
+        IrEngine* prev = ir_prev_.load(std::memory_order_seq_cst);
         if (!prev) {                       // common path — no cabinet crossfade in flight
             if (cur) cur->conv[ch].process(buf, buf, kInternalBlock);
             return;
@@ -1290,7 +1295,7 @@ private:
         for (std::size_t ch = 0; ch < kChannels; ++ch)
             eng->conv[ch].load_ir(ir->data(), ir->size(), kInternalBlock);
 
-        if (ir_active_.load(std::memory_order_acquire)) {
+        if (ir_active_.load(std::memory_order_acquire) && !direct_cpu_) {
             // Cabinet change while an IR is live: demote the current engine to the
             // outgoing slot and publish the new one, so the audio thread crossfades
             // prev→cur over kIrFadeSamples (apply_ir) — click-free. The worker only
@@ -1303,10 +1308,15 @@ private:
             current_ir_ = std::move(eng);
             ir_active_.store(current_ir_.get(), std::memory_order_seq_cst);
         } else {
-            // First IR (no cabinet was active): publish it directly (silence → IR is
-            // an expected timbral change, no crossfade).
+            // First IR (silence → IR is an expected timbral change), OR the
+            // zero-latency direct CPU path — which carries no convolver, so apply_ir
+            // never runs and could never advance a crossfade (leaving a fade stuck
+            // and blocking every later swap). Publish directly and retire any engine
+            // we displace through the epoch list so the audio thread never frees it.
+            std::unique_ptr<IrEngine> displaced = std::move(current_ir_);
             current_ir_ = std::move(eng);
             ir_active_.store(current_ir_.get(), std::memory_order_seq_cst);
+            if (displaced) retire_engine(std::shared_ptr<void>(std::move(displaced)));
         }
         std::lock_guard<std::mutex> lock(ir_mutex_);
         ir_name_ = gpu_nam_basename(path);

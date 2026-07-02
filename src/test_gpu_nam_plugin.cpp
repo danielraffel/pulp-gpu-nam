@@ -1034,6 +1034,94 @@ TEST_CASE("GPU NAM cabinet swap is click-free", "[nam][ir]") {
     std::filesystem::remove(irB);
 }
 
+TEST_CASE("GPU NAM survives rapid consecutive cabinet swaps", "[nam][ir]") {
+    // Swapping cabinets twice inside one crossfade window exercises the 2-engine
+    // invariant: the worker must serialize the second swap behind the first fade
+    // rather than start a second (which would leak or dangle the outgoing engine).
+    // The stream must stay finite and click-free across both changes, and end on
+    // the last-requested cabinet (not wedged mid-fade).
+    constexpr double SR = 48000.0;
+    constexpr std::size_t BLOCK = 512;
+    const auto dir = std::filesystem::temp_directory_path();
+    const std::string irA = (dir / "gpu_nam_rap_a.wav").string();
+    const std::string irB = (dir / "gpu_nam_rap_b.wav").string();
+    const std::string irC = (dir / "gpu_nam_rap_c.wav").string();
+    std::vector<float> a(300, 0.0f), b(300, 0.0f), c(300, 0.0f);
+    a[0] = 1.0f;  a[29] = 0.5f;  for (std::size_t i = 0; i < a.size(); ++i) a[i] += 0.3f * std::exp(-0.012f * i) * std::sin(0.18f * i);
+    b[0] = 0.8f;  b[71] = -0.6f; for (std::size_t i = 0; i < b.size(); ++i) b[i] += 0.4f * std::exp(-0.005f * i) * std::sin(0.06f * i);
+    c[0] = -0.9f; c[53] = 0.55f; for (std::size_t i = 0; i < c.size(); ++i) c[i] += 0.35f * std::exp(-0.008f * i) * std::cos(0.11f * i);
+    write_ir_wav(irA, a);
+    write_ir_wav(irB, b);
+    write_ir_wav(irC, c);
+
+    GpuNamProcessor proc;
+    pulp::state::StateStore store;
+    proc.set_state_store(&store);
+    proc.define_parameters(store);
+    store.set_value(kInputGain, 3.0f);
+    store.set_value(kMix, 100.0f);
+    store.set_value(kBypass, 0.0f);
+    store.set_value(kEngine, 0.0f);
+    proc.load_ir(irA);
+    pulp::format::PrepareContext ctx;
+    ctx.sample_rate = SR; ctx.max_buffer_size = static_cast<int>(BLOCK);
+    ctx.input_channels = 2; ctx.output_channels = 2;
+    proc.prepare(ctx);
+
+    pulp::midi::MidiBuffer mi, mo;
+    pulp::format::ProcessContext pctx; pctx.sample_rate = SR; pctx.num_samples = static_cast<int>(BLOCK);
+    std::vector<float> l(BLOCK), r(BLOCK), ol(BLOCK), orr(BLOCK);
+    std::vector<float> out;
+    const int nblocks = 120;
+    std::size_t swap_at = 0;
+    double phase = 0.0;
+    const double dp = 2.0 * M_PI * 330.0 / SR;
+    for (int blk = 0; blk < nblocks; ++blk) {
+        for (std::size_t i = 0; i < BLOCK; ++i) { l[i] = r[i] = 0.3f * std::sin(phase); phase += dp; }
+        if (blk == nblocks / 3) {
+            proc.load_ir(irB);
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));  // worker stages B
+            swap_at = out.size();
+        }
+        if (blk == nblocks / 3 + 2) {
+            proc.load_ir(irC);   // second swap arrives while A→B is still fading
+        }
+        const float* ip[2] = {l.data(), r.data()};
+        float* op[2] = {ol.data(), orr.data()};
+        pulp::audio::BufferView<const float> iv(ip, 2, BLOCK);
+        pulp::audio::BufferView<float> ov(op, 2, BLOCK);
+        proc.process(ov, iv, mi, mo, pctx);
+        // Give the worker time to drain B's fade and pick up the deferred C swap.
+        if (blk >= nblocks / 3 + 2 && blk < nblocks / 3 + 8)
+            std::this_thread::sleep_for(std::chrono::milliseconds(15));
+        for (std::size_t i = 0; i < BLOCK; ++i) out.push_back(ol[i]);
+    }
+    proc.release();
+
+    auto max_delta = [&](std::size_t lo, std::size_t hi) {
+        double m = 0.0;
+        for (std::size_t i = lo + 1; i < hi && i < out.size(); ++i)
+            m = std::max(m, std::abs(static_cast<double>(out[i]) - out[i - 1]));
+        return m;
+    };
+    REQUIRE(swap_at > BLOCK * 4);
+    for (float v : out) REQUIRE(std::isfinite(v));
+    const double baseline = max_delta(BLOCK * 2, swap_at - BLOCK);
+    const double post = max_delta(swap_at, out.size());
+    REQUIRE(baseline > 0.0);
+    INFO("baseline maxΔ=" << baseline << " post-swaps maxΔ=" << post);
+    CHECK(post < 4.0 * baseline);   // neither swap steps the output
+
+    // The plugin didn't wedge mid-fade: the tail is still a live, non-silent amp.
+    double tail_energy = 0.0;
+    for (std::size_t i = out.size() - BLOCK; i < out.size(); ++i) tail_energy += out[i] * out[i];
+    CHECK(tail_energy > 0.0);
+
+    std::filesystem::remove(irA);
+    std::filesystem::remove(irB);
+    std::filesystem::remove(irC);
+}
+
 TEST_CASE("GPU NAM amps identically under any host block size", "[nam]") {
     // A real host feeds variable, often-smaller-than-internal blocks. The re-block
     // FIFO must make the amped output independent of that chunking; a fixed-block
