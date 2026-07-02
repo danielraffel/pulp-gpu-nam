@@ -9,7 +9,10 @@ HERE="$(cd "$(dirname "$0")" && pwd)"        # the src/ dir
 ROOT="$(cd "$HERE/.." && pwd)"               # the pulp-gpu-nam repo root
 PULP="$ROOT/pulp"                            # the Pulp submodule (packaging tooling)
 BUILD="${BUILD:-$ROOT/build}"
-VER="${VER:-1.1.0}"
+# Default the installer version from the single source in src/CMakeLists.txt
+# (set(GPU_NAM_VERSION "x.y.z")) so the PKG can't drift from the bundle plists.
+VER="${VER:-$(sed -n 's/.*set(GPU_NAM_VERSION "\([0-9][0-9.]*\)").*/\1/p' "$HERE/CMakeLists.txt" | head -1)}"
+VER="${VER:-1.2.0}"   # fallback if the version line is ever moved/renamed
 APP_ID="${APP_ID:-D10A184D5A207EAA926955447DC27E2AD965DFB8}"   # Developer ID Application
 INST_ID="${INST_ID:-0E91CD0D8592220A75AE9D13D4031E36472EE58D}" # Developer ID Installer
 OUT="${OUT:-/tmp/gpu-nam-release}"
