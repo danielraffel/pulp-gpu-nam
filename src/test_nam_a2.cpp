@@ -166,6 +166,41 @@ TEST_CASE("A2 SlimmableContainer defaults to full, set_size selects a variant", 
     std::filesystem::remove(path);
 }
 
+TEST_CASE("A2 set_size resets the re-activated variant's conv history", "[nam][a2]") {
+    // Each variant carries a one-sample memory: output[n] = 2*x[n-1] + 3*x[n]
+    // (identity layer, head kernel=2, taps [2,3]). The bug this pins: switching
+    // A->B->A used to resume A with its stale conv ring, so the first post-switch
+    // sample carried audio from before the switch. After the fix, re-activating a
+    // variant zeroes its history, matching a freshly-reset instance.
+    const std::vector<float> w = {1.0f, 1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 2.0f, 3.0f, 0.0f, 1.0f};
+    const std::string sub = a2_submodel(1, {1}, {1}, /*slope=*/1.0f, /*head_kernel=*/2, w);
+    const std::string json = a2_container({{0.5, sub}, {1.0, sub}});
+    const std::string path = write_temp("gpu_nam_a2_reset_on_switch.nam", json);
+
+    const std::vector<float> test = {0.7f, -0.4f, 0.9f, 0.2f};
+
+    // Reference: a fresh instance on the largest (default) variant, clean history.
+    NamA2 ref; std::string err;
+    REQUIRE(load_nam_a2(path, ref, &err));
+    ref.reset();
+    std::vector<float> ref_out(test.size());
+    for (std::size_t i = 0; i < test.size(); ++i) ref_out[i] = ref.process_sample(test[i]);
+
+    // Subject: pollute the default variant, switch away and back, then run `test`.
+    NamA2 m;
+    REQUIRE(load_nam_a2(path, m, &err));
+    m.reset();
+    m.process_sample(9.0f);
+    m.process_sample(-9.0f);            // leaves x[n-1] = -9 in the default variant's ring
+    REQUIRE(m.set_size(0.3));           // -> smaller variant (changed)
+    m.process_sample(5.0f);
+    REQUIRE(m.set_size(0.9));           // -> back to the default variant (changed -> reset)
+    for (std::size_t i = 0; i < test.size(); ++i)
+        CHECK_THAT(m.process_sample(test[i]), WithinAbs(ref_out[i], 1e-6));
+
+    std::filesystem::remove(path);
+}
+
 TEST_CASE("A2 is_nam_a2 classifier separates A2 from A1", "[nam][a2]") {
     // A2-shaped WaveNet (kernel_sizes array + head dict) and a container are A2.
     const std::string a2wave = a2_submodel(1, {1}, {1}, 0.1f, 2,
