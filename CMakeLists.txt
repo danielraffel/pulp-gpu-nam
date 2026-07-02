@@ -13,6 +13,17 @@
 cmake_minimum_required(VERSION 3.24)
 project(pulp-gpu-nam LANGUAGES C CXX)
 
+# The plugin (and Pulp's macOS view/render/standalone layers it links) compile
+# Objective-C++ (.mm). Pulp enables OBJC/OBJCXX in its own project() call, but a
+# language enabled in a subdirectory's project() doesn't provide compile rules to
+# this top-level project's sibling targets — enable it here at the top level.
+if(APPLE)
+    enable_language(OBJC)
+    enable_language(OBJCXX)
+    set(CMAKE_OBJCXX_STANDARD 20)
+    set(CMAKE_OBJCXX_STANDARD_REQUIRED ON)
+endif()
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -45,6 +56,15 @@ set(PULP_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
 option(GPU_NAM_BUILD_TESTS "Build GPU NAM's own test suite" ON)
 
 add_subdirectory(pulp)
+
+# add_subdirectory(pulp) defines the pulp_add_plugin() function globally, but the
+# target names it resolves (Pulp::standalone, Pulp::format, …) are computed by
+# PulpUtils in Pulp's OWN subdirectory scope and don't propagate to this sibling
+# src/ subdirectory. Re-include PulpUtils here so those are resolved in the
+# consumer's top scope and inherited by src/. (This mirrors what find_package(Pulp)
+# does for installed-SDK consumers.)
+list(APPEND CMAKE_MODULE_PATH "${GPU_NAM_PULP_DIR}/tools/cmake")
+include(PulpUtils)
 
 if(GPU_NAM_BUILD_TESTS)
     include(FetchContent)

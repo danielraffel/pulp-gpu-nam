@@ -70,13 +70,23 @@ git clone https://github.com/danielraffel/pulp-gpu-nam.git
 cd pulp-gpu-nam
 git submodule update --init --recursive
 
-# 2. Configure (Release; the GPU stack is required)
+# 2. (Optional) Fetch the VST3 + AU SDKs. CLAP and the Standalone app build
+#    without any external SDK; run this only if you want the VST3 and/or AU
+#    formats. They're developer-supplied and not vendored here.
+./scripts/fetch-sdks.sh
+
+# 3. Configure (Release; the GPU stack is required)
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 
-# 3. Build the plugin (all four formats) + the standalone app
+# 4. Build the plugin + the standalone app (drop the formats you didn't fetch
+#    an SDK for)
 cmake --build build --target GpuNam_Standalone GpuNam_CLAP GpuNam_VST3 GpuNam_AU \
       -j$(sysctl -n hw.ncpu)
 ```
+
+Pulp is built lean from the submodule (its own examples, tests, and CLIs are
+skipped when it's consumed this way); the first build compiles the Pulp SDK, so
+it takes a while. CLAP + Standalone need no external SDK.
 
 Build products land under `build/` (`CLAP/GpuNam.clap`, `VST3/GpuNam.vst3`,
 `AU/GpuNam.component`, and the standalone app). The bundles are self-contained and
