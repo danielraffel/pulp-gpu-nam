@@ -506,7 +506,14 @@ private:
         canvas.fill_text(proc_.model_name(), sx(rowL), sy(by + 22.0f));
         canvas.set_fill_color(colors_.text_dim);
         canvas.set_font("Roboto", ss(10.0f));
-        canvas.fill_text("WaveNet .nam capture", sx(rowL), sy(by + 38.0f));
+        // Drive the sub-label from the loaded model's real architecture rather than
+        // a hardcoded "WaveNet" — the engine loads WaveNet A1/A2, ConvNet, LSTM,
+        // Linear and Keras/RTNeural captures, so a fixed string mislabels them.
+        {
+            const std::string arch = proc_.model_arch();
+            canvas.fill_text(arch == "none" ? "no capture loaded" : arch + " capture",
+                             sx(rowL), sy(by + 38.0f));
+        }
 
         const float ax = x + w * 0.5f + 20.0f;
         section_label(canvas, ax, by, "ABOUT");
