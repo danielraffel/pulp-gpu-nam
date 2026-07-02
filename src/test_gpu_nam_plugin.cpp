@@ -960,9 +960,9 @@ TEST_CASE("GPU NAM resamples around an off-rate host", "[nam][resample]") {
 
 TEST_CASE("GPU NAM cabinet swap is click-free", "[nam][ir]") {
     // Swapping cabinets while audio flows must not step-discontinuity the output:
-    // the swapper hands the new IR to the running convolver in place, preserving
-    // its overlap history. A hard engine swap (zeroed overlap) would spike the
-    // sample-to-sample delta at the change.
+    // the processor crossfades the outgoing cabinet's output into the incoming one
+    // over a short window. A hard swap (the new IR's response beginning mid-signal)
+    // would spike the sample-to-sample delta at the change.
     constexpr double SR = 48000.0;
     constexpr std::size_t BLOCK = 512;
     const auto dir = std::filesystem::temp_directory_path();

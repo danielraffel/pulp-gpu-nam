@@ -589,6 +589,9 @@ public:
 
         // Rebuild a previously-selected IR at the (possibly new) sample rate,
         // synchronously so the first block has it. Empty = no IR = pass-through.
+        ir_prev_.store(nullptr, std::memory_order_release);
+        prev_ir_.reset();
+        ir_fade_pos_.store(0, std::memory_order_relaxed);
         current_ir_.reset();
         ir_active_.store(nullptr, std::memory_order_release);
         if (const std::string ipath = current_requested_ir_path(); !ipath.empty())
@@ -615,12 +618,14 @@ public:
         gpu_engine_active_.store(false, std::memory_order_release);
         cpu_active_.store(nullptr, std::memory_order_release);
         ir_active_.store(nullptr, std::memory_order_release);
+        ir_prev_.store(nullptr, std::memory_order_release);
         {
             std::lock_guard<std::mutex> lock(stack_mutex_);
             current_stack_.reset();
         }
         current_cpu_.reset();
         current_ir_.reset();
+        prev_ir_.reset();
         retirees_.clear();   // worker stopped — safe to free all retirees now
     }
 
@@ -781,13 +786,13 @@ private:
 
     // Cabinet IR: one partitioned convolver per channel over the fixed internal
     // block. Heap-owned, built/freed only off the audio thread; the audio thread
-    // loads a pointer to it (nullptr = no IR = pass-through). The per-channel
-    // swapper lets a NEW cabinet be staged off-thread and picked up in place by the
-    // audio thread (try_swap_ir), preserving the convolver's overlap history — so
-    // auditioning cabinets is click-free (no reset to zeroed overlap).
+    // loads a pointer to it (nullptr = no IR = pass-through). Auditioning a new
+    // cabinet builds a fresh engine and the audio thread crossfades its output from
+    // the outgoing engine to the incoming one (see apply_ir), so switching cabinets
+    // is click-free — a hard in-place swap would step-discontinuity the output
+    // because the new IR's response starts mid-signal.
     struct IrEngine {
         std::array<signal::PartitionedConvolver, kChannels> conv{};
-        std::array<signal::ConvolverIrSwapper, kChannels> swapper{};
     };
     // Cabinet IRs are short; cap the decode + convolution cost.
     static constexpr double kMaxIrSeconds = 2.0;
@@ -1052,16 +1057,37 @@ private:
     // the convolver is preallocated; nullptr = no IR = pass-through. In-place is
     // safe — the convolver reads the whole input block before writing output.
     //
-    // Changing cabinets stages the new IR into the live engine's swapper off the
-    // audio thread; here the audio thread picks it up in place (try_swap_ir keeps
-    // the convolver's overlap history) so the swap is click-free. The first load
-    // (no IR → IR) and removal (IR → no IR) go through the ir_active_ pointer, as
-    // adding/removing a cabinet is an expected timbral change.
+    // Changing cabinets publishes a fresh engine (ir_active_) while the outgoing one
+    // stays live in ir_prev_; here the audio thread runs BOTH on the same input and
+    // linearly blends prev→cur across kIrFadeSamples so the switch is click-free (a
+    // hard swap would step-discontinuity the output — the new IR's response begins
+    // mid-signal, and a one-sided fade would trade the up-step for a down-step).
+    // Both channels use the same fade position within a frame; the last channel
+    // advances it. The worker retires the outgoing engine once the fade completes.
+    // Adding the first IR / removing the last go straight through ir_active_ (an
+    // expected timbral change, no crossfade).
     void apply_ir(std::size_t ch, float* buf) {
-        IrEngine* ir = ir_active_.load(std::memory_order_seq_cst);
-        if (!ir) return;
-        ir->conv[ch].try_swap_ir(ir->swapper[ch]);
-        ir->conv[ch].process(buf, buf, kInternalBlock);
+        IrEngine* prev = ir_prev_.load(std::memory_order_seq_cst);
+        IrEngine* cur  = ir_active_.load(std::memory_order_seq_cst);
+        if (!prev) {                       // common path — no cabinet crossfade in flight
+            if (cur) cur->conv[ch].process(buf, buf, kInternalBlock);
+            return;
+        }
+        const int pos = ir_fade_pos_.load(std::memory_order_relaxed);
+        float old_out[kInternalBlock];
+        std::copy_n(buf, kInternalBlock, old_out);
+        if (cur) cur->conv[ch].process(buf, buf, kInternalBlock);
+        else     std::fill_n(buf, kInternalBlock, 0.0f);
+        prev->conv[ch].process(old_out, old_out, kInternalBlock);
+        const float inv = 1.0f / static_cast<float>(kIrFadeSamples);
+        for (std::size_t i = 0; i < kInternalBlock; ++i) {
+            float a = static_cast<float>(pos + static_cast<int>(i)) * inv;
+            if (a > 1.0f) a = 1.0f;
+            buf[i] = a * buf[i] + (1.0f - a) * old_out[i];
+        }
+        if (ch == kChannels - 1)
+            ir_fade_pos_.store(pos + static_cast<int>(kInternalBlock),
+                               std::memory_order_relaxed);
     }
 
     // GPU engine: same fixed re-blocking, each B-block processed as ONE stereo
@@ -1258,19 +1284,27 @@ private:
             runtime::log_error("GPU NAM: load_ir('{}') failed; keeping current IR.", path);
             return;
         }
-        if (IrEngine* active = ir_active_.load(std::memory_order_acquire)) {
-            // Cabinet change while an IR is live: stage the new IR into the running
-            // engine's swappers (allocates + FFTs here, off the audio thread). The
-            // audio thread swaps it in place next block, preserving the overlap
-            // tail — click-free. drain the displaced state back here on the next
-            // worker tick.
-            for (std::size_t ch = 0; ch < kChannels; ++ch)
-                active->swapper[ch].stage_ir(ir->data(), ir->size(), kInternalBlock);
+        // Build the new IR into a fresh engine (allocates + FFTs here, off the audio
+        // thread). The first block sees it convolving from silence.
+        auto eng = std::make_unique<IrEngine>();
+        for (std::size_t ch = 0; ch < kChannels; ++ch)
+            eng->conv[ch].load_ir(ir->data(), ir->size(), kInternalBlock);
+
+        if (ir_active_.load(std::memory_order_acquire)) {
+            // Cabinet change while an IR is live: demote the current engine to the
+            // outgoing slot and publish the new one, so the audio thread crossfades
+            // prev→cur over kIrFadeSamples (apply_ir) — click-free. The worker only
+            // reaches here when no fade is in flight (gated in worker_loop), so the
+            // 2-engine invariant holds: prev_ir_ is empty on entry. The outgoing
+            // engine is retired once the fade completes.
+            ir_fade_pos_.store(0, std::memory_order_relaxed);
+            prev_ir_ = std::move(current_ir_);                        // keep it alive...
+            ir_prev_.store(prev_ir_.get(), std::memory_order_seq_cst); // ...crossfade from it
+            current_ir_ = std::move(eng);
+            ir_active_.store(current_ir_.get(), std::memory_order_seq_cst);
         } else {
-            // First IR (no cabinet was active): build + publish a fresh engine.
-            auto eng = std::make_unique<IrEngine>();
-            for (std::size_t ch = 0; ch < kChannels; ++ch)
-                eng->conv[ch].load_ir(ir->data(), ir->size(), kInternalBlock);
+            // First IR (no cabinet was active): publish it directly (silence → IR is
+            // an expected timbral change, no crossfade).
             current_ir_ = std::move(eng);
             ir_active_.store(current_ir_.get(), std::memory_order_seq_cst);
         }
@@ -1319,11 +1353,14 @@ private:
             // provably cycled past them (grace-period reclamation).
             retirees_.reclaim(audio_epoch_.load(std::memory_order_acquire));
 
-            // Reclaim IR states the audio thread displaced via try_swap_ir. Worker
-            // owns current_ir_, so draining its swappers here is thread-safe.
-            if (current_ir_)
-                for (std::size_t ch = 0; ch < kChannels; ++ch)
-                    current_ir_->swapper[ch].drain_old();
+            // Cabinet crossfade complete? Once the audio thread has ramped fully to
+            // the new cabinet (apply_ir), drop the outgoing engine and reclaim it via
+            // the epoch list — never freed while the audio thread might still hold it.
+            if (prev_ir_ &&
+                ir_fade_pos_.load(std::memory_order_acquire) >= kIrFadeSamples) {
+                ir_prev_.store(nullptr, std::memory_order_seq_cst);
+                retire_engine(std::shared_ptr<void>(std::move(prev_ir_)));
+            }
 
             // Model reload?
             const std::uint32_t gen = model_req_generation_.load(std::memory_order_acquire);
@@ -1362,9 +1399,11 @@ private:
                 }
             }
 
-            // IR reload / clear?
+            // IR reload / clear? Defer while a cabinet crossfade is still draining so
+            // only one fade is ever in flight (the 2-engine invariant) — the pending
+            // request is picked up on a later tick once prev_ir_ has been retired.
             const std::uint32_t ir_gen = ir_req_generation_.load(std::memory_order_acquire);
-            if (ir_gen != last_seen_ir_gen_) {
+            if (ir_gen != last_seen_ir_gen_ && !prev_ir_) {
                 last_seen_ir_gen_ = ir_gen;
                 const std::string ipath = current_requested_ir_path();
                 if (ipath.empty()) unpublish_ir();
@@ -1473,10 +1512,19 @@ private:
     std::unique_ptr<CpuEngine> current_cpu_;
     std::atomic<CpuEngine*> cpu_active_{nullptr};
 
-    // Cabinet IR engine (default none), published lock-free; built/swapped off the
-    // audio thread and retired through retirees_ so the audio thread never frees.
+    // Cabinet IR engine (default none), published lock-free; built off the audio
+    // thread and retired through retirees_ so the audio thread never frees. A
+    // cabinet change publishes a fresh current_ir_ and keeps the outgoing engine in
+    // prev_ir_/ir_prev_ so the audio thread can crossfade prev→cur (apply_ir); the
+    // worker retires the outgoing engine once ir_fade_pos_ reaches kIrFadeSamples.
     std::unique_ptr<IrEngine> current_ir_;
     std::atomic<IrEngine*> ir_active_{nullptr};
+    std::unique_ptr<IrEngine> prev_ir_;                 // outgoing engine (worker-owned)
+    std::atomic<IrEngine*> ir_prev_{nullptr};           // audio reads it during a crossfade
+    std::atomic<int> ir_fade_pos_{0};                   // samples elapsed in the active fade
+    // Cabinet-swap crossfade length. ~43 ms @ 48 kHz — long enough to declick a
+    // hard cabinet change, short enough to feel immediate.
+    static constexpr int kIrFadeSamples = 2048;
 
     // Optional GPU engine (default OFF), switchable live.
     std::unique_ptr<GpuStack> current_stack_;
