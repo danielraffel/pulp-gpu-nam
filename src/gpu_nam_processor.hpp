@@ -363,11 +363,25 @@ public:
         return model_name_;
     }
 
-    /// Architecture of the loaded model ("WaveNet", "LSTM", or "none"), for the
-    /// UI to surface which .nam family is running. UI/main-thread only.
+    /// Architecture of the loaded model — one of "WaveNet", "WaveNet-A2",
+    /// "ConvNet", "LSTM", "Linear", or "none" (Keras/RTNeural `.json` captures
+    /// report via the same accessor) — for the UI to surface which .nam family is
+    /// running. UI/main-thread only.
     std::string model_arch() const {
         std::lock_guard<std::mutex> lock(model_mutex_);
         return model_arch_;
+    }
+
+    /// True when apply_ir should crossfade between two distinct published IR
+    /// engines. A null outgoing pointer means no swap is in flight; equal pointers
+    /// mean the worker is mid-publish — it stores ir_prev_ then ir_active_, so for
+    /// one instant both slots hold the outgoing engine — and blending an engine
+    /// against itself while advancing the fade would burn the crossfade window on
+    /// the old cabinet. In both cases the audio thread runs the active engine at
+    /// full gain and leaves the fade counter at 0. Pure pointer identity (no
+    /// deref); exposed so the publish-race guard is unit-testable without threading.
+    static bool should_crossfade(const void* cur, const void* prev) {
+        return prev != nullptr && prev != cur;
     }
 
     /// Licensing status for the editor's About panel. "Free (MIT) build" for the
@@ -777,8 +791,9 @@ public:
 private:
     static constexpr std::size_t kChannels = 2;
 
-    // The inline CPU engine: one NAM oracle per channel (WaveNet or LSTM — the
-    // NamRuntime hides which). Heap-owned, built/freed only off the audio thread;
+    // The inline CPU engine: one NAM oracle per channel (WaveNet A1/A2, ConvNet,
+    // LSTM, Linear, or Keras — the NamRuntime hides which). Heap-owned, built/freed
+    // only off the audio thread;
     // the audio thread loads a pointer to it.
     struct CpuEngine {
         std::array<nam::NamRuntime, kChannels> model{};
@@ -1074,7 +1089,19 @@ private:
         // the crossfade removes).
         IrEngine* cur  = ir_active_.load(std::memory_order_seq_cst);
         IrEngine* prev = ir_prev_.load(std::memory_order_seq_cst);
-        if (!prev) {                       // common path — no cabinet crossfade in flight
+        // No fade when there is no outgoing engine — OR when both slots still point
+        // at the same engine. The worker publishes prev then cur (both seq_cst), so
+        // for one instant during a swap ir_prev_ and ir_active_ both hold the
+        // outgoing engine before ir_active_ is flipped to the incoming one. Blending
+        // an engine against itself is a no-op, but advancing the fade counter there
+        // would burn the crossfade window against the old cabinet and leave the real
+        // swap with little fade left — the click we set out to remove. Running cur at
+        // full gain (pos frozen at 0) is exactly right: cur is still the live cabinet
+        // until ir_active_ flips, and the crossfade then starts cleanly from 0. The
+        // seq_cst order also guarantees the inverse — observing cur == incoming
+        // implies prev == outgoing (non-null) — so the fade path below never sees a
+        // half-published pair.
+        if (!should_crossfade(cur, prev)) {  // common path — no cabinet crossfade in flight
             if (cur) cur->conv[ch].process(buf, buf, kInternalBlock);
             return;
         }

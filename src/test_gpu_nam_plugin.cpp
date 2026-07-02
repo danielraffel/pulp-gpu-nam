@@ -1122,6 +1122,28 @@ TEST_CASE("GPU NAM survives rapid consecutive cabinet swaps", "[nam][ir]") {
     std::filesystem::remove(irC);
 }
 
+TEST_CASE("GPU NAM crossfade never blends an IR engine against itself", "[nam][ir]") {
+    // The worker publishes the outgoing engine (ir_prev_) then the incoming one
+    // (ir_active_), so for one instant both atomics hold the SAME outgoing engine.
+    // If apply_ir crossfaded there, it would blend that engine against itself (a
+    // no-op) while advancing the fade counter against the old cabinet — and if the
+    // worker stalled through the whole fade window, the new cabinet would later
+    // publish with no crossfade left: the click the feature exists to remove.
+    // should_crossfade() gates that: it only fades between two DISTINCT non-null
+    // engines. This pins the predicate deterministically (the live race is a
+    // sub-microsecond window the threaded swap tests cannot reliably hit).
+    int e0 = 0, e1 = 0;  // stand-ins for two distinct engine addresses
+    const void* engA = &e0;
+    const void* engB = &e1;
+    // No swap in flight: prev is null → run active at full gain, no fade.
+    REQUIRE_FALSE(GpuNamProcessor::should_crossfade(engA, nullptr));
+    REQUIRE_FALSE(GpuNamProcessor::should_crossfade(nullptr, nullptr));
+    // Mid-publish transient: both slots hold the outgoing engine → NO fade.
+    REQUIRE_FALSE(GpuNamProcessor::should_crossfade(engA, engA));
+    // Fully published: incoming ≠ outgoing → crossfade proceeds.
+    REQUIRE(GpuNamProcessor::should_crossfade(engB, engA));
+}
+
 TEST_CASE("GPU NAM amps identically under any host block size", "[nam]") {
     // A real host feeds variable, often-smaller-than-internal blocks. The re-block
     // FIFO must make the amped output independent of that chunking; a fixed-block
