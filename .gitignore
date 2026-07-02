@@ -1,0 +1,19 @@
+# Build output
+/build/
+/build-*/
+*.o
+*.a
+
+# macOS
+.DS_Store
+
+# Packaging staging / signed artifacts
+/dist/
+*.pkg
+*.dmg
+*.zip
+
+# Editor/IDE
+.vscode/
+.idea/
+compile_commands.json
