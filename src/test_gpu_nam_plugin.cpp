@@ -669,6 +669,87 @@ TEST_CASE("GPU NAM CPU-only path reports zero latency and matches the re-block p
     REQUIRE(max_abs < 1e-4);
 }
 
+TEST_CASE("GPU NAM direct path shares one inference and stays bit-exact on divergence",
+          "[nam]") {
+    // The zero-latency CPU path (LSTM = not GPU-eligible) runs ONE NAM inference
+    // when both channels' drive is identical and resyncs channel 1 when they
+    // diverge — exactly like the re-block path. Channel 1's whole path (shared
+    // phase, resync, diverged inference) must be bit-identical to always inferring
+    // it independently.
+    namespace fs = std::filesystem;
+    const std::string lstm = (fs::path(GPU_NAM_MODELS_DIR) / "lstm.nam").string();
+    if (!fs::exists(lstm)) { WARN("missing lstm.nam fixture; skipping"); return; }
+
+    constexpr std::size_t BLOCK = GpuNamProcessor::kInternalBlock;
+    constexpr double SR = 48000.0;
+    const int mono_blocks = 6, div_blocks = 6, nblocks = mono_blocks + div_blocks;
+
+    std::vector<float> Lseq(nblocks * BLOCK), Rseq(nblocks * BLOCK);
+    for (int b = 0; b < nblocks; ++b)
+        for (std::size_t i = 0; i < BLOCK; ++i) {
+            const int n = b * static_cast<int>(BLOCK) + static_cast<int>(i);
+            const float fn = static_cast<float>(n);
+            if (b < mono_blocks) {
+                Lseq[n] = Rseq[n] = 0.4f * std::sin(0.05f * fn);
+            } else {
+                Lseq[n] = 0.3f * std::cos(0.07f * fn);
+                Rseq[n] = 0.35f * std::sin(0.031f * fn) + 0.1f;
+            }
+        }
+
+    bool skipped = false;
+    auto run_stereo = [&](const std::vector<float>& L, const std::vector<float>& R,
+                          std::vector<float>& outL, std::vector<float>& outR) {
+        GpuNamProcessor proc;
+        pulp::state::StateStore store;
+        proc.set_state_store(&store);
+        proc.define_parameters(store);
+        store.set_value(kInputGain, 0.0f);
+        store.set_value(kOutputGain, 0.0f);
+        store.set_value(kMix, 100.0f);
+        store.set_value(kBypass, 0.0f);
+        store.set_value(kEngine, 0.0f);
+        proc.load_model(lstm);
+        pulp::format::PrepareContext ctx;
+        ctx.sample_rate = SR; ctx.max_buffer_size = static_cast<int>(BLOCK);
+        ctx.input_channels = 2; ctx.output_channels = 2;
+        proc.prepare(ctx);
+        if (proc.latency_samples() != 0) { skipped = true; proc.release(); return; }
+        std::vector<float> il(BLOCK), ir(BLOCK), ol(BLOCK), orr(BLOCK);
+        pulp::midi::MidiBuffer mi, mo;
+        pulp::format::ProcessContext pctx;
+        pctx.sample_rate = SR; pctx.num_samples = static_cast<int>(BLOCK);
+        const int nb = static_cast<int>(L.size() / BLOCK);
+        for (int b = 0; b < nb; ++b) {
+            for (std::size_t i = 0; i < BLOCK; ++i) { il[i] = L[b * BLOCK + i]; ir[i] = R[b * BLOCK + i]; }
+            const float* ip[2] = {il.data(), ir.data()};
+            float* op[2] = {ol.data(), orr.data()};
+            pulp::audio::BufferView<const float> iv(ip, 2, BLOCK);
+            pulp::audio::BufferView<float> ov(op, 2, BLOCK);
+            proc.process(ov, iv, mi, mo, pctx);
+            outL.insert(outL.end(), ol.begin(), ol.end());
+            outR.insert(outR.end(), orr.begin(), orr.end());
+        }
+        proc.release();
+    };
+
+    std::vector<float> realL, realR;
+    run_stereo(Lseq, Rseq, realL, realR);
+    if (skipped) { WARN("lstm.nam is not " << SR << " Hz (direct path inactive); skipping"); return; }
+    // Reference: channel 1's full input as mono — its channel 0 always infers.
+    std::vector<float> refL, refR;
+    run_stereo(Rseq, Rseq, refL, refR);
+
+    REQUIRE(realR.size() == refL.size());
+    for (std::size_t i = 0; i < realR.size(); ++i) { INFO("sample " << i); REQUIRE(realR[i] == refL[i]); }
+    for (std::size_t i = 0; i < static_cast<std::size_t>(mono_blocks) * BLOCK; ++i)
+        REQUIRE(realL[i] == realR[i]);
+    double diverged = 0.0;
+    for (std::size_t i = realR.size() - 2 * BLOCK; i < realR.size(); ++i)
+        diverged += std::abs(realL[i] - realR[i]);
+    REQUIRE(diverged > 1e-3);
+}
+
 TEST_CASE("GPU NAM noise gate attenuates a sub-threshold signal", "[nam]") {
     constexpr std::size_t BLOCK = GpuNamProcessor::kInternalBlock;
     constexpr double SR = 48000.0;

@@ -484,6 +484,8 @@ public:
         nam_share_.assign(kInternalBlock, 0.0f);
         rs_drive_.assign(max_block, 0.0f);
         direct_wet_.assign(max_block, 0.0f);
+        direct_drive1_.assign(max_block, 0.0f);
+        direct_wet1_.assign(max_block, 0.0f);
         {
             std::lock_guard<std::mutex> lock(model_mutex_);
             model_ = model;
@@ -502,6 +504,11 @@ public:
             }
             current_cpu_ = std::move(cpu);
             cpu_active_.store(current_cpu_.get(), std::memory_order_seq_cst);
+            // Re-arm the dual-mono fast path for the new engine. The audio-thread
+            // guard keys on the engine pointer; clearing it here makes the re-arm
+            // deterministic even if the allocator hands back the prior address.
+            fill_cpu_seen_ = nullptr;
+            nam_diverged_ = false;
         }
 
         // Learn the GPU transport latency by pre-building the stack once when a
@@ -907,26 +914,69 @@ private:
                          audio::BufferView<float>& output,
                          float mix, float in_gain, float out_gain) {
         CpuEngine* cpu = cpu_active_.load(std::memory_order_seq_cst);
+        // Reset the dual-mono latch on a fresh engine (shared with fill_wet_cpu;
+        // only one of the two paths runs for a prepared lifetime).
+        if (cpu != fill_cpu_seen_) { nam_diverged_ = false; fill_cpu_seen_ = cpu; }
         const std::size_t n = output.num_samples();
         const std::size_t ch_count = output.num_channels();
-        for (std::size_t ch = 0; ch < ch_count && ch < kChannels; ++ch) {
-            const float* in = ch < input.num_channels() ? input.channel(ch).data() : nullptr;
-            float* out = output.channel(ch).data();
-            // Drive: input × gain, then the gate — matching the re-block path exactly.
+        const std::size_t bytes = n * sizeof(float);
+
+        // Drive: input × gain, then the gate — matching the re-block path exactly.
+        auto build_drive = [&](std::size_t ch, const float* in, float* dst) {
             for (std::size_t i = 0; i < n; ++i) {
                 float drive = in ? in[i] * in_gain : 0.0f;
                 if (gate_active_) drive = gate_[ch].process(drive);
-                rs_drive_[i] = drive;
+                dst[i] = drive;
             }
-            if (cpu) cpu->model[ch].process(rs_drive_.data(), direct_wet_.data(),
-                                            static_cast<std::uint32_t>(n));
-            else std::fill_n(direct_wet_.data(), n, 0.0f);
-            apply_tone_n(ch, direct_wet_.data(), n);
+        };
+        // Emit one channel: tone → DC-block → mix with the un-delayed dry.
+        auto emit = [&](std::size_t ch, float* wet, const float* in, float* out) {
+            apply_tone_n(ch, wet, n);
             for (std::size_t i = 0; i < n; ++i) {
-                const float wet_i = dc_[ch].process(direct_wet_[i]);
+                const float wet_i = dc_[ch].process(wet[i]);
                 const float dry_i = in ? in[i] : 0.0f;
                 out[i] = (1.0f - mix) * dry_i + mix * out_gain * wet_i;
             }
+        };
+
+        const float* in0 = (ch_count > 0 && input.num_channels() > 0)
+                               ? input.channel(0).data() : nullptr;
+        const float* in1 = (ch_count > 1 && input.num_channels() > 1)
+                               ? input.channel(1).data() : nullptr;
+
+        // Dual-mono fast path: a mono source panned to stereo drives both channels
+        // identically, so run ONE NAM inference and feed both — the dominant cost for
+        // the CPU-only users this path targets. tone/DC still run per channel. On the
+        // first block the drives differ, resync channel 1's NAM state from channel 0
+        // (which carried the shared history) and retire the shortcut for the engine's
+        // life, keeping the diverged output bit-exact. Mirrors fill_wet_cpu.
+        if (cpu && ch_count >= 2 && in0 && in1) {
+            build_drive(0, in0, rs_drive_.data());
+            build_drive(1, in1, direct_drive1_.data());
+            const bool mono = !nam_diverged_ &&
+                std::memcmp(rs_drive_.data(), direct_drive1_.data(), bytes) == 0;
+            if (!nam_diverged_ && !mono) {
+                cpu->model[1] = cpu->model[0];
+                nam_diverged_ = true;
+            }
+            cpu->model[0].process(rs_drive_.data(), direct_wet_.data(),
+                                  static_cast<std::uint32_t>(n));
+            if (mono) std::memcpy(direct_wet1_.data(), direct_wet_.data(), bytes);
+            else cpu->model[1].process(direct_drive1_.data(), direct_wet1_.data(),
+                                       static_cast<std::uint32_t>(n));
+            emit(0, direct_wet_.data(), in0, output.channel(0).data());
+            emit(1, direct_wet1_.data(), in1, output.channel(1).data());
+            return;
+        }
+
+        // General path (mono output, a missing input channel, or no engine).
+        for (std::size_t ch = 0; ch < ch_count && ch < kChannels; ++ch) {
+            const float* in = ch < input.num_channels() ? input.channel(ch).data() : nullptr;
+            build_drive(ch, in, rs_drive_.data());
+            if (cpu) cpu->model[ch].process(rs_drive_.data(), direct_wet_.data(),
+                                            static_cast<std::uint32_t>(n));
+            else std::fill_n(direct_wet_.data(), n, 0.0f);
+            emit(ch, direct_wet_.data(), in, output.channel(ch).data());
         }
     }
 
@@ -1364,10 +1414,14 @@ private:
     bool nam_diverged_ = false;
     CpuEngine* fill_cpu_seen_ = nullptr;
     // Zero-latency direct path (matched-rate, CPU-only, no IR — decided once at
-    // prepare, fixed for the prepared lifetime). direct_wet_ is a host-block-sized
-    // NAM-output scratch; rs_drive_ (also host-block sized, unused when not
-    // resampling) carries the drive.
+    // prepare, fixed for the prepared lifetime). Host-block-sized scratch: rs_drive_
+    // (unused when not resampling) + direct_drive1_ carry each channel's drive;
+    // direct_wet_ + direct_wet1_ hold each channel's NAM output. The dual-mono fast
+    // path (shared with the FIFO path via nam_diverged_/fill_cpu_seen_) runs ONE
+    // inference when both channels' drive is identical.
     std::vector<float> direct_wet_;
+    std::vector<float> direct_drive1_;
+    std::vector<float> direct_wet1_;
 
     // Sample-rate conversion around the model. NAM captures are trained at a fixed
     // rate (usually 48 kHz); running the network at a different rate shifts its
