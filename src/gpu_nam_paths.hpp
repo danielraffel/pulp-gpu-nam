@@ -11,6 +11,8 @@
 // dir), then the source-tree path baked in at build time. Every function returns
 // an empty string when nothing is found, so callers degrade gracefully.
 
+#include <algorithm>
+#include <cctype>
 #include <fstream>
 #include <string>
 #include <system_error>
@@ -109,6 +111,51 @@ inline std::string gpu_nam_content_subdir(const std::string& sub) {
 inline std::string gpu_nam_basename(const std::string& path) {
     const auto slash = path.find_last_of("/\\");
     return slash == std::string::npos ? path : path.substr(slash + 1);
+}
+
+// Sorted (by name) list of regular files in `dir` whose extension matches one of
+// `exts` (each given without the dot, lower-case; matched case-insensitively).
+// Empty when the directory is missing or holds no match. Backs the file-slot
+// prev/next browse controls for models and cabinet IRs.
+inline std::vector<std::string> gpu_nam_list_files(
+    const std::string& dir, const std::vector<std::string>& exts) {
+    std::vector<std::string> out;
+    if (dir.empty()) return out;
+    std::error_code ec;
+    for (const auto& entry : std::filesystem::directory_iterator(dir, ec)) {
+        std::error_code fec;
+        if (!entry.is_regular_file(fec)) continue;
+        std::string ext = entry.path().extension().string();  // e.g. ".NAM"
+        if (!ext.empty() && ext.front() == '.') ext.erase(ext.begin());
+        for (char& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        for (const std::string& want : exts)
+            if (ext == want) { out.push_back(entry.path().string()); break; }
+    }
+    std::sort(out.begin(), out.end());
+    return out;
+}
+
+// The next (`delta` >= 0) or previous (`delta` < 0) file — wrapping — in the same
+// directory as `current`, among files matching `exts`, sorted by name. Returns the
+// sole match when the directory has one, the first match when `current` isn't in
+// the list, and "" only when the directory holds no match at all. Pure path logic;
+// does not touch the audio path.
+inline std::string gpu_nam_neighbor_file(
+    const std::string& current, const std::vector<std::string>& exts, int delta) {
+    if (current.empty()) return {};
+    const std::string dir = std::filesystem::path(current).parent_path().string();
+    const std::vector<std::string> files = gpu_nam_list_files(dir, exts);
+    if (files.empty()) return {};
+    if (files.size() == 1) return files.front();
+    std::size_t idx = 0;
+    bool found = false;
+    for (std::size_t i = 0; i < files.size(); ++i)
+        if (files[i] == current) { idx = i; found = true; break; }
+    if (!found) return files.front();
+    const int n = static_cast<int>(files.size());
+    int j = (static_cast<int>(idx) + (delta >= 0 ? 1 : -1)) % n;
+    if (j < 0) j += n;
+    return files[static_cast<std::size_t>(j)];
 }
 
 // Resolve the vendored NAM UI-asset directory (images + fonts): an explicit

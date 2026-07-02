@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <fstream>
 #include <thread>
 #include <vector>
 
@@ -797,4 +798,77 @@ TEST_CASE("Wet output DC offset is removed", "[gpu-nam][plugin][dc]") {
     mean /= static_cast<double>(tail);
     CHECK(std::abs(mean) < 1e-3);                              // DC removed
     CHECK(std::abs(mean) < 0.2 * std::abs(raw));               // << the raw model DC
+}
+
+// The file-slot prev/next browse controls (and the clear glyph) are backed by the
+// pure path helpers in gpu_nam_paths.hpp. Exercise them directly with a temp
+// directory so the model/IR cycling UX is proven without a live window.
+TEST_CASE("GPU NAM file browse: list_files filters by extension, sorted", "[nam][browse]") {
+    namespace fs = std::filesystem;
+    const auto dir = fs::temp_directory_path() / "gpu-nam-browse-list";
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    for (const char* n : {"b.nam", "a.nam", "c.NAM", "note.txt", "cab.wav"})
+        std::ofstream(dir / n) << "x";
+
+    const auto nams = gpu_nam_list_files(dir.string(), {"nam"});
+    REQUIRE(nams.size() == 3);                                  // .txt/.wav excluded
+    CHECK(gpu_nam_basename(nams[0]) == "a.nam");                // sorted by name
+    CHECK(gpu_nam_basename(nams[1]) == "b.nam");
+    CHECK(gpu_nam_basename(nams[2]) == "c.NAM");                // case-insensitive ext
+
+    CHECK(gpu_nam_list_files(dir.string(), {"wav", "aiff"}).size() == 1);
+    CHECK(gpu_nam_list_files((dir / "does-not-exist").string(), {"nam"}).empty());
+    fs::remove_all(dir);
+}
+
+TEST_CASE("GPU NAM file browse: neighbor cycles and wraps", "[nam][browse]") {
+    namespace fs = std::filesystem;
+    const auto dir = fs::temp_directory_path() / "gpu-nam-browse-neighbor";
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    for (const char* n : {"a.nam", "b.nam", "c.nam"})
+        std::ofstream(dir / n) << "x";
+    const std::string a = (dir / "a.nam").string();
+    const std::string b = (dir / "b.nam").string();
+    const std::string c = (dir / "c.nam").string();
+
+    CHECK(gpu_nam_neighbor_file(a, {"nam"}, +1) == b);          // next
+    CHECK(gpu_nam_neighbor_file(b, {"nam"}, +1) == c);
+    CHECK(gpu_nam_neighbor_file(c, {"nam"}, +1) == a);          // wraps forward
+    CHECK(gpu_nam_neighbor_file(a, {"nam"}, -1) == c);          // wraps backward
+    CHECK(gpu_nam_neighbor_file(b, {"nam"}, -1) == a);          // prev
+
+    // A path not in the listing (stale selection) snaps to the first match.
+    CHECK(gpu_nam_neighbor_file((dir / "gone.nam").string(), {"nam"}, +1) == a);
+
+    // Single-file directory returns the same file; empty directory returns "".
+    const auto solo = fs::temp_directory_path() / "gpu-nam-browse-solo";
+    fs::remove_all(solo);
+    fs::create_directories(solo);
+    const std::string only = (solo / "only.nam").string();
+    std::ofstream(only) << "x";
+    CHECK(gpu_nam_neighbor_file(only, {"nam"}, +1) == only);
+    CHECK(gpu_nam_neighbor_file(only, {"wav"}, +1).empty());    // no match at all
+
+    fs::remove_all(dir);
+    fs::remove_all(solo);
+}
+
+// clear_model()/clear_ir() are thin wrappers that reset the slot to its
+// no-user-selection state; verify the observable UI-facing flags flip without a
+// live audio thread (load_* only latches the request; no prepare() needed here).
+TEST_CASE("GPU NAM clear resets the model + IR slots", "[nam][browse]") {
+    GpuNamProcessor proc;
+    // Model: a user selection marks user_model_loaded(); clear reverts it.
+    proc.load_model("/nonexistent/custom.nam");
+    CHECK(proc.user_model_loaded());
+    proc.clear_model();
+    CHECK_FALSE(proc.user_model_loaded());                      // back to bundled default
+
+    // IR: user_ir_loaded() only becomes true once an IR is actually built on the
+    // audio path, so with no prepare()/process() it stays false; clear_ir() must
+    // still leave it false and not crash.
+    proc.clear_ir();
+    CHECK_FALSE(proc.user_ir_loaded());
 }

@@ -187,6 +187,29 @@ public:
         return user_model_loaded_.load(std::memory_order_acquire);
     }
 
+    /// Browse to the next (`delta` >= 0) / previous (`delta` < 0) `.nam` in the
+    /// current model's folder, sorted by name and wrapping. With no user model yet,
+    /// starts from the installed sample Models folder. No-op when nothing matches.
+    /// UI/main-thread only; the swap itself is RT-safe via load_model().
+    void cycle_model(int delta) {
+        const bool user_loaded = user_model_loaded_.load(std::memory_order_acquire);
+        std::string current;
+        {
+            std::lock_guard<std::mutex> lock(model_req_mutex_);
+            current = requested_model_path_;
+        }
+        std::string next;
+        if (user_loaded && !current.empty()) {
+            next = gpu_nam_neighbor_file(current, {"nam"}, delta);
+        } else {
+            const auto files = gpu_nam_list_files(gpu_nam_content_subdir("Models"), {"nam"});
+            if (!files.empty()) next = delta >= 0 ? files.front() : files.back();
+        }
+        if (!next.empty()) load_model(next);
+    }
+    /// Drop the user's model selection and revert to the bundled default.
+    void clear_model() { load_model(std::string()); }
+
     /// Load (or clear, with an empty path) a cabinet impulse response. The IR is
     /// decoded + built off the audio thread and swapped in RT-safely; it sits
     /// after the tone stack in the wet chain, matching the reference's order.
@@ -206,6 +229,29 @@ public:
         std::lock_guard<std::mutex> lock(ir_mutex_);
         return ir_name_;
     }
+
+    /// Browse to the next (`delta` >= 0) / previous (`delta` < 0) cabinet IR in the
+    /// current IR's folder, sorted by name and wrapping. With no IR loaded yet,
+    /// starts from the installed sample Cabinets folder. No-op when nothing matches.
+    /// UI/main-thread only; the swap itself is click-free + RT-safe via load_ir().
+    void cycle_ir(int delta) {
+        std::string current;
+        {
+            std::lock_guard<std::mutex> lock(ir_req_mutex_);
+            current = requested_ir_path_;
+        }
+        static const std::vector<std::string> kIrExts{"wav", "aiff", "aif", "flac"};
+        std::string next;
+        if (!current.empty()) {
+            next = gpu_nam_neighbor_file(current, kIrExts, delta);
+        } else {
+            const auto files = gpu_nam_list_files(gpu_nam_content_subdir("Cabinets"), kIrExts);
+            if (!files.empty()) next = delta >= 0 ? files.front() : files.back();
+        }
+        if (!next.empty()) load_ir(next);
+    }
+    /// Remove the current cabinet IR (reverts to the dry, IR-off path).
+    void clear_ir() { load_ir(std::string()); }
 
     /// True when the live audio path is actually the GPU engine (Engine=GPU is
     /// requested AND a GPU device is available AND the transport is published).
@@ -990,7 +1036,7 @@ private:
         ir_name_ = gpu_nam_basename(path);
     }
 
-    void clear_ir() {
+    void unpublish_ir() {
         ir_active_.store(nullptr, std::memory_order_seq_cst);   // unpublish before retiring
         retire_engine(std::shared_ptr<void>(std::move(current_ir_)));
         std::lock_guard<std::mutex> lock(ir_mutex_);
@@ -1079,7 +1125,7 @@ private:
             if (ir_gen != last_seen_ir_gen_) {
                 last_seen_ir_gen_ = ir_gen;
                 const std::string ipath = current_requested_ir_path();
-                if (ipath.empty()) clear_ir();
+                if (ipath.empty()) unpublish_ir();
                 else               build_and_publish_ir(ipath);
             }
 

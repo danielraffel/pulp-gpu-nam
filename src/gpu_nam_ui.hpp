@@ -329,6 +329,9 @@ private:
         canvas.fill_rect(sx(bx), sy(y + h - pad - 1.5f), ss(bw), ss(1.5f));
     }
 
+    // Sub-region hit-rects inside each file slot: prev/next browse arrows + clear.
+    struct SlotHits { vw::Rect prev, next, clear; };
+
     void paint_file_slots(cv::Canvas& canvas) {
         // Show the model path only once a user picks one; the bundled default
         // reads as NAM's first-open prompt (faithful to the reference default).
@@ -342,6 +345,25 @@ private:
         ir_slot_ = paint_file_slot(canvas, nam_geom::kModelT + nam_geom::kIrDy,
                                    ir_loaded ? "IRIconOn.svg" : "IRIconOff.svg",
                                    ir_label, ir_loaded);
+        // Cache the browse-cluster / clear hit-rects so pointer_press can route a
+        // click on ‹ · › (prev/next) and the right-edge globe (clear) to the right
+        // action; clicks elsewhere in the slot still open the native chooser.
+        model_hits_ = slot_hits(nam_geom::kModelT);
+        ir_hits_ = slot_hits(nam_geom::kModelT + nam_geom::kIrDy);
+    }
+
+    // Hit-rects (screen space) for a file slot's prev/next arrows and clear glyph,
+    // matching the icon positions drawn in paint_file_slot(). The ArrowLeft/Right
+    // icons are drawn oversized and overlapping, so the hit split is tighter than
+    // the icons to keep prev vs next unambiguous.
+    SlotHits slot_hits(float top) {
+        const float fx = nam_geom::kFileFieldL;
+        const float mid = top + nam_geom::kFileH * 0.5f;
+        SlotHits h;
+        h.prev  = {sx(fx + 24.0f), sy(mid - 12.0f), ss(19.0f), ss(24.0f)};
+        h.next  = {sx(fx + 43.0f), sy(mid - 12.0f), ss(19.0f), ss(24.0f)};
+        h.clear = {sx(nam_geom::kFileR - 27.0f), sy(mid - 10.0f), ss(22.0f), ss(20.0f)};
+        return h;
     }
 
     vw::Rect paint_file_slot(cv::Canvas& canvas, float top, const char* type_icon,
@@ -552,7 +574,15 @@ private:
                       sy(nam_geom::kGearY + nam_geom::kGearSz * 0.5f), ss(18.0f))) {
             show_settings_ = true; return;
         }
-        // File slots open the native pickers.
+        // File-slot browse cluster: ‹ · › cycle through the folder, the globe
+        // clears. These sit inside the slot rect, so test them first.
+        if (in_rect(p, model_hits_.prev))  { proc_.cycle_model(-1); return; }
+        if (in_rect(p, model_hits_.next))  { proc_.cycle_model(+1); return; }
+        if (in_rect(p, model_hits_.clear)) { proc_.clear_model();  return; }
+        if (in_rect(p, ir_hits_.prev))     { proc_.cycle_ir(-1);   return; }
+        if (in_rect(p, ir_hits_.next))     { proc_.cycle_ir(+1);   return; }
+        if (in_rect(p, ir_hits_.clear))    { proc_.clear_ir();     return; }
+        // Anywhere else in a slot opens the native picker.
         if (in_rect(p, model_slot_)) { open_model_chooser(); return; }
         if (in_rect(p, ir_slot_)) { open_ir_chooser(); return; }
         // Toggles.
@@ -629,6 +659,7 @@ private:
     vw::Rect settings_engine_cpu_{}, settings_engine_gpu_{}, settings_bypass_{},
         settings_normalize_{}, settings_close_{};
     vw::Rect model_slot_{}, ir_slot_{};
+    SlotHits model_hits_{}, ir_hits_{};
 };
 
 } // namespace pulp::examples
