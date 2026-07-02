@@ -79,11 +79,19 @@ public:
         if (rf_ <= 0) return x;
         hist_[static_cast<std::size_t>(pos_)] = x;
         float acc = bias_;
-        int idx = pos_;                              // k=0 reads x[n]
-        for (int k = 0; k < rf_; ++k) {
-            acc += ir_[static_cast<std::size_t>(k)] * hist_[static_cast<std::size_t>(idx)];
-            idx = (idx == 0) ? rf_ - 1 : idx - 1;    // step one sample into the past
-        }
+        // Walk the taps as two contiguous history spans instead of a per-tap
+        // `idx = (idx==0)?rf-1:idx-1` wrap branch (which made the dot strictly
+        // serial). Tap order is still ascending k=0..rf-1 reading progressively
+        // older samples, so the running sum is bit-identical; the branch-free
+        // straight loops let the compiler pipeline/vectorize.
+        //   Span A: k=0..pos_        reads hist_[pos_-k]   (down to slot 0)
+        //   Span B: k=pos_+1..rf-1   reads hist_[rf_+pos_-k] (wrapped: rf-1..pos_+1)
+        for (int k = 0; k <= pos_; ++k)
+            acc += ir_[static_cast<std::size_t>(k)]
+                   * hist_[static_cast<std::size_t>(pos_ - k)];
+        for (int k = pos_ + 1; k < rf_; ++k)
+            acc += ir_[static_cast<std::size_t>(k)]
+                   * hist_[static_cast<std::size_t>(rf_ + pos_ - k)];
         pos_ = (pos_ + 1 == rf_) ? 0 : pos_ + 1;
         return acc;
     }

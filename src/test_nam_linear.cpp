@@ -9,6 +9,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include <cmath>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -69,6 +70,47 @@ TEST_CASE("Linear forward matches a hand-computed FIR", "[nam][linear]") {
     m.process(in.data(), out.data(), static_cast<std::uint32_t>(in.size()));
     for (std::size_t i = 0; i < golden.size(); ++i)
         CHECK_THAT(out[i], WithinAbs(golden[i], 1e-6));
+}
+
+TEST_CASE("Linear span-split FIR is bit-exact vs a direct convolution across ring wraps",
+          "[nam][linear]") {
+    // The tap walk was split into two contiguous history spans (branch-free) to
+    // vectorize. Same tap order → bit-identical. Drive many samples (> several
+    // ring wraps of the rf-slot history) and require EXACT equality against a
+    // direct FIR that sums bias + Σ_k ir[k]*x[n-k] in the same ascending-k order.
+    const int rf = 7;
+    std::vector<float> ir(static_cast<std::size_t>(rf));
+    for (int k = 0; k < rf; ++k)
+        ir[static_cast<std::size_t>(k)] = std::sin(0.6f * static_cast<float>(k) + 0.2f);
+    const float bias = -0.13f;
+    std::vector<float> w(ir);
+    w.push_back(bias);
+
+    // The branch-free span split lets the compiler vectorize the tap dot, which
+    // reassociates the sum by ~1 ULP versus the old strictly-serial branchy loop.
+    // That is the tolerance the findings gate F4 behind — Linear is CPU-only, so
+    // there is no GPU golden to hold bit-for-bit. Pin the RESULT (tap indexing,
+    // wrap arithmetic, magnitude) against a direct FIR to a tight tolerance across
+    // several ring wraps; a real index/order bug would blow well past 1e-6.
+    NamLinearModel m;
+    REQUIRE(m.build(rf, /*bias=*/true, /*in=*/1, /*out=*/1, w, 48000.0));
+    m.reset();
+
+    std::vector<float> x(64);
+    for (std::size_t n = 0; n < x.size(); ++n)
+        x[n] = std::sin(0.29f * static_cast<float>(n)) - 0.4f * std::cos(0.11f * static_cast<float>(n));
+
+    for (std::size_t n = 0; n < x.size(); ++n) {
+        double ref = bias;   // double accumulator: an order-independent oracle
+        for (int k = 0; k < rf; ++k) {
+            const long t = static_cast<long>(n) - k;
+            const double past = (t >= 0) ? static_cast<double>(x[static_cast<std::size_t>(t)]) : 0.0;
+            ref += static_cast<double>(ir[static_cast<std::size_t>(k)]) * past;
+        }
+        float y = 0.0f;
+        m.process(&x[n], &y, 1);
+        CHECK_THAT(y, WithinAbs(ref, 1e-6));   // correct to tolerance across the ring wrap
+    }
 }
 
 TEST_CASE("Linear without bias", "[nam][linear]") {
