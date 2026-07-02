@@ -237,6 +237,12 @@ public:
         std::lock_guard<std::mutex> lock(ir_req_mutex_);
         requested_ir_path_ = path;
         ir_req_generation_.fetch_add(1, std::memory_order_release);
+        // The zero-latency CPU path carries no convolver (an IR would reintroduce
+        // the re-block latency it exists to avoid). A cabinet requested while it is
+        // active is staged and engages on the next prepare (reopen / rate change).
+        if (direct_cpu_ && !path.empty())
+            runtime::log_info("GPU NAM: cabinet IR staged; it engages after the "
+                              "plugin is reopened while the zero-latency CPU path is active.");
     }
     /// True when an IR is actually applied (built + published), NOT merely
     /// requested — so a pending or failed load reads as "no IR", matching what
@@ -477,6 +483,7 @@ public:
         wet_.assign(kInternalBlock, 0.0f);
         nam_share_.assign(kInternalBlock, 0.0f);
         rs_drive_.assign(max_block, 0.0f);
+        direct_wet_.assign(max_block, 0.0f);
         {
             std::lock_guard<std::mutex> lock(model_mutex_);
             model_ = model;
@@ -532,11 +539,23 @@ public:
             }
         }
 
+        // Zero-latency direct path: no GPU device (so no CPU↔GPU switch is possible
+        // for this activation), rates match (no resampler group delay), and no IR is
+        // requested (the partitioned convolver needs fixed kInternalBlock blocks —
+        // an IR keeps the FIFO). The CPU engines are per-sample streaming, so a
+        // host-sized block runs directly with zero added latency. Decided ONCE here
+        // and fixed for the prepared lifetime, exactly like gpu_extra_.
+        direct_cpu_ = !device_available_ && !resample_active_ &&
+                      current_requested_ir_path().empty();
+
         // Reported latency is at the HOST rate. The re-block FIFO + GPU-transport
         // delay are internal-rate sample counts; when resampling, convert them to
         // host samples and add each resampler's group delay (≈ (taps-1)/2 at its
-        // input rate). Matched rates reduce to kInternalBlock + gpu_extra_.
-        if (resample_active_) {
+        // input rate). Matched rates reduce to kInternalBlock + gpu_extra_; the
+        // direct path reports zero.
+        if (direct_cpu_) {
+            latency_samples_ = 0;
+        } else if (resample_active_) {
             const double to_host = sample_rate_ / internal_rate_;
             const double in_delay = 0.5 * static_cast<double>(in_rs_[0].taps_per_phase() - 1);
             const double out_delay =
@@ -641,6 +660,15 @@ public:
         update_gate(state().get_value(kNoiseGateThreshold));
         update_tone(state().get_value(kToneBass), state().get_value(kToneMiddle),
                     state().get_value(kToneTreble));
+
+        // Zero-latency CPU path: no FIFO, host-sized blocks straight through the
+        // per-sample engine, dry/wet aligned with no delay. Same per-sample math as
+        // the re-block path, minus the kInternalBlock latency.
+        if (direct_cpu_) {
+            fill_direct_cpu(input, output, mix, in_gain, out_gain);
+            publish_meters(input, output, n);
+            return;
+        }
 
         // Append the drive signal (input × input-gain, then noise gate) to the
         // re-block FIFO; the active engine transforms drive → wet (model output).
@@ -869,6 +897,39 @@ private:
         }
     }
 
+    // Zero-latency path: run the CPU engine on the whole host block, no FIFO. The
+    // engine (gate → NAM → tone → DC) is per-sample streaming, so a variable-width
+    // block produces the same samples as the re-block path would — just emitted
+    // kInternalBlock samples earlier. No IR here (direct_cpu_ requires none). Dry
+    // and wet are aligned at zero delay. RT-safe: rs_drive_/direct_wet_ are
+    // preallocated to the host-max block. Runs on the audio thread.
+    void fill_direct_cpu(const audio::BufferView<const float>& input,
+                         audio::BufferView<float>& output,
+                         float mix, float in_gain, float out_gain) {
+        CpuEngine* cpu = cpu_active_.load(std::memory_order_seq_cst);
+        const std::size_t n = output.num_samples();
+        const std::size_t ch_count = output.num_channels();
+        for (std::size_t ch = 0; ch < ch_count && ch < kChannels; ++ch) {
+            const float* in = ch < input.num_channels() ? input.channel(ch).data() : nullptr;
+            float* out = output.channel(ch).data();
+            // Drive: input × gain, then the gate — matching the re-block path exactly.
+            for (std::size_t i = 0; i < n; ++i) {
+                float drive = in ? in[i] * in_gain : 0.0f;
+                if (gate_active_) drive = gate_[ch].process(drive);
+                rs_drive_[i] = drive;
+            }
+            if (cpu) cpu->model[ch].process(rs_drive_.data(), direct_wet_.data(),
+                                            static_cast<std::uint32_t>(n));
+            else std::fill_n(direct_wet_.data(), n, 0.0f);
+            apply_tone_n(ch, direct_wet_.data(), n);
+            for (std::size_t i = 0; i < n; ++i) {
+                const float wet_i = dc_[ch].process(direct_wet_[i]);
+                const float dry_i = in ? in[i] : 0.0f;
+                out[i] = (1.0f - mix) * dry_i + mix * out_gain * wet_i;
+            }
+        }
+    }
+
     // Push one internal block of CPU wet through the per-channel extra-delay ring
     // (length gpu_extra_), in place. RT-safe: the ring is preallocated.
     void delay_cpu_wet(std::size_t ch) {
@@ -922,10 +983,11 @@ private:
 
     // Apply one channel's tone stack in place over an internal block (RT-safe).
     // A no-op when EQ is off, so the model output passes through unfiltered.
-    void apply_tone(std::size_t ch, float* buf) {
+    void apply_tone(std::size_t ch, float* buf) { apply_tone_n(ch, buf, kInternalBlock); }
+    void apply_tone_n(std::size_t ch, float* buf, std::size_t count) {
         if (!eq_active_) return;
         auto& t = tone_[ch];
-        for (std::size_t i = 0; i < kInternalBlock; ++i)
+        for (std::size_t i = 0; i < count; ++i)
             buf[i] = t[2].process(t[1].process(t[0].process(buf[i])));
     }
 
@@ -1301,6 +1363,11 @@ private:
     std::vector<float> nam_share_;
     bool nam_diverged_ = false;
     CpuEngine* fill_cpu_seen_ = nullptr;
+    // Zero-latency direct path (matched-rate, CPU-only, no IR — decided once at
+    // prepare, fixed for the prepared lifetime). direct_wet_ is a host-block-sized
+    // NAM-output scratch; rs_drive_ (also host-block sized, unused when not
+    // resampling) carries the drive.
+    std::vector<float> direct_wet_;
 
     // Sample-rate conversion around the model. NAM captures are trained at a fixed
     // rate (usually 48 kHz); running the network at a different rate shifts its
@@ -1356,6 +1423,11 @@ private:
     mutable std::mutex stack_mutex_;
     std::atomic<bool> gpu_engine_active_{false};
     bool device_available_ = false;
+    // Latched at prepare: run the CPU engine directly on host-sized blocks with no
+    // re-block FIFO, when no GPU device exists (permanently CPU), rates match, and
+    // no IR is loaded. Removes the kInternalBlock (10.7 ms @ 48 kHz) FIFO latency a
+    // CPU-only host would otherwise pay for parity with an absent GPU engine.
+    bool direct_cpu_ = false;
     std::size_t gpu_extra_ = 0;
     int latency_samples_ = static_cast<int>(kInternalBlock);
 
