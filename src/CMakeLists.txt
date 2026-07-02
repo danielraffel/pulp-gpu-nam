@@ -143,6 +143,13 @@ if(TARGET pulp::runtime)
         target_link_libraries(gpu-nam-retire-test PRIVATE Catch2::Catch2WithMain)
         target_include_directories(gpu-nam-retire-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
         add_test(NAME gpu-nam-retire-test COMMAND gpu-nam-retire-test)
+
+        # Output-level make-up math (Raw / Normalized / Calibrated). Pure header,
+        # no pulp/GPU deps — just Catch2.
+        add_executable(gpu-nam-output-cal-test test_output_calibration.cpp)
+        target_link_libraries(gpu-nam-output-cal-test PRIVATE Catch2::Catch2WithMain)
+        target_include_directories(gpu-nam-output-cal-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+        add_test(NAME gpu-nam-output-cal-test COMMAND gpu-nam-output-cal-test)
     endif()
 endif()
 
