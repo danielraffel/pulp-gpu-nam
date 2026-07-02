@@ -169,7 +169,7 @@ if(TARGET pulp::render AND TARGET pulp::gpu-audio)
         PLUGIN_NAME       "GpuNam"
         BUNDLE_ID         "com.pulp.gpunam"
         MANUFACTURER      "Pulp"
-        VERSION           "1.1.0"
+        VERSION           "1.2.0"
         CATEGORY          Effect
         PLUGIN_CODE       "GNam"
         MANUFACTURER_CODE "Pulp"
