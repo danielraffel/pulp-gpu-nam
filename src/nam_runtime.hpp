@@ -186,6 +186,36 @@ public:
         for (std::uint32_t i = 0; i < n; ++i) out[i] = in[i];
     }
 
+    // Number of selectable size variants. > 1 only for a packed SlimmableContainer
+    // (A2-Full / A2-Lite / ...); every other model — including a bare A2 WaveNet —
+    // reports 1, so the plugin shows the "Slim" control only when it does something.
+    int variant_count() const {
+#if GPU_NAM_WITH_A2
+        if (arch_ == Arch::WaveNetA2) return a2_.variant_count();
+#endif
+        return 1;
+    }
+
+    // Which variant is active (0 = smallest .. variant_count()-1 = Full), or 0.
+    int active_variant() const {
+#if GPU_NAM_WITH_A2
+        if (arch_ == Arch::WaveNetA2) return a2_.active_variant();
+#endif
+        return 0;
+    }
+
+    // Select a size in [0,1] on a SlimmableContainer: the smallest variant whose
+    // max_value >= size, else Full. Returns true iff the active variant changed (so
+    // the caller can rebuild + prewarm the engine off the audio thread). No-op /
+    // false for single-variant models. Off the audio thread only.
+    bool set_size(double size) {
+#if GPU_NAM_WITH_A2
+        if (arch_ == Arch::WaveNetA2) return a2_.set_size(size);
+#endif
+        (void)size;
+        return false;
+    }
+
     // Only feedforward architectures with a fused GPU forward are GPU-eligible.
     // WaveNet is today; recurrent LSTM (and, until its GPU path lands, Linear)
     // run CPU-only.

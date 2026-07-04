@@ -128,7 +128,9 @@ public:
     void on_mouse_up(vw::Point) override { pointer_release(); }
 
     // Open/close the settings overlay programmatically (screenshots, tests).
-    void show_settings(bool on) { show_settings_ = on; }
+    void show_settings(bool on) { show_settings_ = on; if (!on) show_slim_info_ = false; }
+    // Open/close the slim-size info popover programmatically (screenshots, tests).
+    void show_slim_info(bool on) { show_slim_info_ = on; }
 
     // Test accessors (headless interaction verification).
     vw::Point knob_center_for_test(int i) {
@@ -145,6 +147,21 @@ public:
         return {sx(nam_geom::kGearX + nam_geom::kGearSz * 0.5f),
                 sy(nam_geom::kGearY + nam_geom::kGearSz * 0.5f)};
     }
+    // Settings-page hit centers. Valid only after a paint with settings open (the
+    // rects are computed in paint_settings); the caller renders once, then clicks.
+    static vw::Point rect_center(const vw::Rect& r) {
+        return {r.x + r.width * 0.5f, r.y + r.height * 0.5f};
+    }
+    vw::Point output_mode_center_for_test(int i) const {  // 0=Raw 1=Normalized 2=Calibrated
+        return rect_center(i == 0 ? settings_output_raw_
+                           : i == 1 ? settings_output_norm_ : settings_output_cal_);
+    }
+    int slim_count_for_test() const { return settings_slim_count_; }
+    vw::Point slim_center_for_test(int i) const {
+        return rect_center(settings_slim_[static_cast<std::size_t>(i)]);
+    }
+    vw::Point slim_info_center_for_test() const { return rect_center(settings_slim_info_); }
+    bool slim_info_open_for_test() const { return show_slim_info_; }
 
 private:
     struct KnobSpec { pulp::state::ParamID id; const char* label; float lo, hi; const char* unit; };
@@ -463,39 +480,71 @@ private:
 
         const float rowL = x + 40.0f, rowW = w - 80.0f;
         const float segW = (rowW - 14.0f) * 0.5f;
-        float cy = y + 84.0f;
+        float cy = y + 60.0f;
 
         // Audio engine — a two-option selector (parallels the reference's
-        // Output-Mode radio).
+        // Output-Mode radio). One help line keeps the page compact enough for the
+        // Output-Mode and Slim rows below.
         section_label(canvas, rowL, cy, "AUDIO ENGINE");
-        cy += 12.0f;
+        cy += 14.0f;
         const bool gpu = store_.get_value(kEngine) >= 0.5f;
         settings_engine_cpu_ = seg(canvas, rowL, cy, segW, "CPU oracle", !gpu);
         settings_engine_gpu_ = seg(canvas, rowL + segW + 14.0f, cy, segW, "GPU engine", gpu);
-        cy += 40.0f;
-        help(canvas, rowL, cy,
-             "Runs the neural amp on the CPU (always available) or the GPU");
-        help(canvas, rowL, cy + 15.0f, "(opt-in, bit-exact against the CPU oracle).");
-        cy += 44.0f;
+        cy += 34.0f;
+        help(canvas, rowL, cy, "CPU (always available) or GPU (opt-in, bit-exact vs the CPU oracle).");
+        cy += 16.0f;
 
-        // Bypass + Output Mode — two switch rows side by side. Output Mode cycles
-        // Raw → Normalized → Calibrated on click (loudness make-up; see
-        // output_calibration.hpp).
-        const float colR = rowL + segW + 14.0f;
-        section_label(canvas, rowL, cy, "BYPASS");
-        section_label(canvas, colR, cy, "OUTPUT MODE");
-        cy += 12.0f;
+        // Output Mode as a full-width 3-segment row so Raw / Normalized / Calibrated
+        // are all visible at once (not a cycling toggle). Make-up math lives in
+        // output_calibration.hpp. Default is Normalized (parity with NAM).
+        section_label(canvas, rowL, cy, "OUTPUT MODE");
+        cy += 14.0f;
+        const int omode_i = static_cast<int>(std::lround(store_.get_value(kOutputMode)));
+        const float osw = (rowW - 28.0f) / 3.0f;
+        settings_output_raw_  = seg(canvas, rowL,                        cy, osw, "Raw",        omode_i == 0);
+        settings_output_norm_ = seg(canvas, rowL + (osw + 14.0f),        cy, osw, "Normalized", omode_i == 1);
+        settings_output_cal_  = seg(canvas, rowL + 2.0f * (osw + 14.0f), cy, osw, "Calibrated", omode_i == 2);
+        cy += 34.0f;
+        help(canvas, rowL, cy,
+             "Raw = model level \xC2\xB7 Normalized = -18 dBFS \xC2\xB7 Calibrated needs loudness metadata.");
+        cy += 16.0f;
+
+        // Bypass (left half) shares a row with the Slim size selector (right half).
+        // Slim shows one segment per variant only for a packed SlimmableContainer
+        // (>1 variant); selecting one rebuilds the engine off the audio thread (see
+        // kSize handling). Single-variant models leave the right half empty.
         const bool byp = store_.get_value(kBypass) >= 0.5f;
-        const nam::OutputMode omode = nam::output_mode_from_param(store_.get_value(kOutputMode));
-        const char* omode_label = omode == nam::OutputMode::Raw          ? "Raw"
-                                  : omode == nam::OutputMode::Normalized ? "Normalized"
-                                                                         : "Calibrated";
+        const int vc = proc_.model_variant_count();
+        settings_slim_count_ = 0;
+        section_label(canvas, rowL, cy, "BYPASS");
+        settings_slim_info_ = {};
+        if (vc > 1) {
+            const float slimLabelL = rowL + segW + 14.0f;
+            section_label(canvas, slimLabelL, cy, "SLIM SIZE");
+            // A small ⓘ dot right of the label opens a succinct popover explaining
+            // that Full is not automatically "better" (more CPU + a brighter top
+            // end that doesn't suit every source), so a Lite default never reads as
+            // the plugin sounding wrong. Click toggles it; drawn last, on top.
+            const float dotCx = slimLabelL + 62.0f, dotCy = cy - 3.0f;
+            paint_info_dot(canvas, dotCx, dotCy);
+            settings_slim_info_ = {sx(dotCx - 8.0f), sy(dotCy - 8.0f), ss(16.0f), ss(16.0f)};
+        }
+        cy += 14.0f;
         settings_bypass_ = seg(canvas, rowL, cy, segW, byp ? "Bypassed" : "Active", byp);
-        settings_output_mode_ =
-            seg(canvas, colR, cy, segW, omode_label, omode != nam::OutputMode::Raw);
+        if (vc > 1) {
+            const float slimL = rowL + segW + 14.0f;
+            const int n = std::min(vc, static_cast<int>(settings_slim_.size()));
+            const float gap = 8.0f;
+            const float sw = (segW - gap * static_cast<float>(n - 1)) / static_cast<float>(n);
+            const int active = variant_for_size(store_.get_value(kSize), n);
+            for (int i = 0; i < n; ++i) {
+                const char* lbl = (i == n - 1) ? "Full" : (i == 0 ? "Lite" : "Mid");
+                settings_slim_[static_cast<std::size_t>(i)] =
+                    seg(canvas, slimL + static_cast<float>(i) * (sw + gap), cy, sw, lbl, i == active);
+            }
+            settings_slim_count_ = n;
+        }
         cy += 40.0f;
-        help(canvas, rowL, cy, "Passes the dry input through, unprocessed.");
-        help(canvas, colR, cy, "Raw / Normalized (−18 dBFS) / Calibrated (needs loudness metadata).");
 
         // Bottom: Model (left) + About (right), like the reference's Model-Info /
         // About blocks.
@@ -530,6 +579,9 @@ private:
         canvas.set_fill_color(g.active ? colors_.accent : colors_.text_dim);
         canvas.set_font("Roboto", ss(10.0f));
         canvas.fill_text(buf, sx(ax), sy(by + 38.0f));
+
+        // Slim-info popover on top of everything, when toggled open.
+        if (show_slim_info_ && settings_slim_count_ > 0) paint_slim_info_popover(canvas);
     }
 
     void section_label(cv::Canvas& canvas, float x, float y, const char* text) {
@@ -543,6 +595,39 @@ private:
         canvas.set_font("Roboto", ss(9.5f));
         canvas.set_text_align(cv::TextAlign::left);
         canvas.fill_text(text, sx(x), sy(y));
+    }
+    // A small ⓘ affordance: a filled dim dot with a bright "i".
+    void paint_info_dot(cv::Canvas& canvas, float cx, float cy) {
+        canvas.set_fill_color(colors_.text_dim);
+        canvas.fill_circle(sx(cx), sy(cy), ss(6.0f));
+        canvas.set_fill_color(colors_.panel);
+        canvas.set_font("Roboto", ss(9.0f));
+        canvas.set_text_align(cv::TextAlign::center);
+        canvas.fill_text("i", sx(cx), sy(cy + 3.2f));
+        canvas.set_text_align(cv::TextAlign::left);
+    }
+    // Succinct, blame-free note on why Full is not automatically "better", so a
+    // Lite default never reads as the plugin sounding wrong.
+    void paint_slim_info_popover(cv::Canvas& canvas) {
+        static const char* kLines[] = {
+            "Full runs a larger network: more CPU, and",
+            "often a brighter, hotter top end.",
+            "Bigger isn't always better \xE2\x80\x94 Lite can sit",
+            "smoother in a mix. Try both; keep what fits.",
+        };
+        const int n = static_cast<int>(sizeof(kLines) / sizeof(kLines[0]));
+        const float px = 286.0f, py = 266.0f, pw = 252.0f;
+        const float pad = 10.0f, lh = 13.0f, ph = pad * 2.0f + lh * static_cast<float>(n);
+        canvas.set_fill_color(cv::Color::rgba8(12, 12, 14).with_alpha(0.99f));
+        canvas.fill_rounded_rect(sx(px), sy(py), ss(pw), ss(ph), ss(6.0f));
+        canvas.set_stroke_color(colors_.accent);
+        canvas.set_line_width(ss(1.0f));
+        canvas.stroke_rounded_rect(sx(px), sy(py), ss(pw), ss(ph), ss(6.0f));
+        canvas.set_fill_color(colors_.text);
+        canvas.set_font("Roboto", ss(10.0f));
+        canvas.set_text_align(cv::TextAlign::left);
+        for (int i = 0; i < n; ++i)
+            canvas.fill_text(kLines[i], sx(px + pad), sy(py + pad + lh * (static_cast<float>(i) + 0.8f)));
     }
     // A selectable segment: lit = accent fill, else dim outline. Returns its rect.
     vw::Rect seg(cv::Canvas& canvas, float x, float y, float w, const std::string& text, bool on) {
@@ -572,15 +657,27 @@ private:
         pointer_down_ = true;
 
         if (show_settings_) {
-            if (in_rect(p, settings_close_)) { show_settings_ = false; return; }
+            if (in_rect(p, settings_close_)) { close_settings(); return; }
+            if (settings_slim_count_ > 0 && in_rect(p, settings_slim_info_)) {
+                show_slim_info_ = !show_slim_info_; return;
+            }
             if (in_rect(p, settings_engine_cpu_)) { set_param(kEngine, 0.0f); return; }
             if (in_rect(p, settings_engine_gpu_)) { set_param(kEngine, 1.0f); return; }
             if (in_rect(p, settings_bypass_)) { toggle_param(kBypass); return; }
-            if (in_rect(p, settings_output_mode_)) { cycle_output_mode(); return; }
-            // A click outside the page closes it; clicks inside are inert.
+            if (in_rect(p, settings_output_raw_))  { set_param(kOutputMode, 0.0f); return; }
+            if (in_rect(p, settings_output_norm_)) { set_param(kOutputMode, 1.0f); return; }
+            if (in_rect(p, settings_output_cal_))  { set_param(kOutputMode, 2.0f); return; }
+            for (int i = 0; i < settings_slim_count_; ++i)
+                if (in_rect(p, settings_slim_[static_cast<std::size_t>(i)])) {
+                    set_param(kSize, size_for_variant(i, settings_slim_count_));
+                    return;
+                }
+            // A click outside the page closes it; clicks inside are inert (and
+            // dismiss the slim-info popover if it is open).
             const vw::Rect page{sx(34.0f), sy(34.0f),
                                 ss(nam_geom::kW - 68.0f), ss(nam_geom::kH - 68.0f)};
-            if (!in_rect(p, page)) show_settings_ = false;
+            if (!in_rect(p, page)) close_settings();
+            else show_slim_info_ = false;
             return;
         }
         if (in_circle(p, sx(nam_geom::kGearX + nam_geom::kGearSz * 0.5f),
@@ -637,6 +734,7 @@ private:
         if (active_knob_ >= 0) { edit_.finish(); active_knob_ = -1; }
     }
 
+    void close_settings() { show_settings_ = false; show_slim_info_ = false; }
     void set_param(pulp::state::ParamID id, float v) {
         pulp::state::ParameterEdit t(store_);
         t.begin(id); t.set(id, v); t.finish();
@@ -645,9 +743,19 @@ private:
         set_param(id, store_.get_value(id) >= 0.5f ? 0.0f : 1.0f);
     }
     // Cycle the 3-way Output Mode: Raw → Normalized → Calibrated → Raw.
-    void cycle_output_mode() {
-        const int m = static_cast<int>(std::lround(store_.get_value(kOutputMode)));
-        set_param(kOutputMode, static_cast<float>((m + 1) % 3));
+    // Map the Slim size param [0,1] to/from a variant index for an n-variant model.
+    // The UI does not know each variant's max_value, so it assumes an even split —
+    // self-consistent with size_for_variant (clicking segment i lands on variant i).
+    // NamA2::set_size picks the smallest variant whose max_value >= size, so the
+    // last segment always uses 1.0 to guarantee Full.
+    static int variant_for_size(float size, int n) {
+        if (n <= 1) return 0;
+        int i = static_cast<int>(std::floor(size * static_cast<float>(n)));
+        return std::clamp(i, 0, n - 1);
+    }
+    static float size_for_variant(int i, int n) {
+        if (n <= 1 || i >= n - 1) return 1.0f;
+        return (static_cast<float>(i) + 0.5f) / static_cast<float>(n);
     }
 
     float knob_value(int i) const {
@@ -674,8 +782,12 @@ private:
     float drag_start_y_ = 0.0f, drag_start_frac_ = 0.0f;
     bool pointer_down_ = false;
     bool show_settings_ = false;
+    bool show_slim_info_ = false;              // slim-size info popover toggled open
     vw::Rect settings_engine_cpu_{}, settings_engine_gpu_{}, settings_bypass_{},
-        settings_output_mode_{}, settings_close_{};
+        settings_output_raw_{}, settings_output_norm_{}, settings_output_cal_{},
+        settings_close_{}, settings_slim_info_{};
+    std::array<vw::Rect, 8> settings_slim_{};  // one hit-rect per SlimmableContainer variant
+    int settings_slim_count_ = 0;              // 0 unless a multi-variant model is loaded
     vw::Rect model_slot_{}, ir_slot_{};
     SlotHits model_hits_{}, ir_hits_{};
 };
