@@ -456,6 +456,88 @@ TEST_CASE("GPU NAM GPU engine reproduces the CPU engine", "[nam][gpu]") {
     proc.release();
 }
 
+TEST_CASE("GPU NAM GPU engine keeps stereo channels independent on the shared device",
+          "[nam][gpu]") {
+    // Both channels' WaveNet forwards run on ONE shared Dawn device, each on its own
+    // (block_size, instance) plan slot. Drive DISTINCT left/right signals so a plan
+    // collision (e.g. both channels defaulting to instance 0) is visible: each GPU
+    // channel must reproduce its OWN channel's CPU reference, not the other's. The
+    // mono-in dual-mono tests can't catch this — they feed identical L/R.
+    constexpr std::size_t BLOCK = GpuNamProcessor::kInternalBlock;
+    constexpr double SR = 48000.0;
+    const int nblocks = 32;
+
+    // Distinct L/R: different frequency + phase, so cross-channel leakage decorrelates.
+    std::vector<float> inL, inR;
+    for (int b = 0; b < nblocks; ++b) {
+        for (std::size_t i = 0; i < BLOCK; ++i) {
+            const float t = static_cast<float>(b * BLOCK + i);
+            inL.push_back(0.50f * std::sin(0.060f * t));
+            inR.push_back(0.45f * std::sin(0.130f * t + 0.7f));
+        }
+    }
+
+    long blocks = 0, misses = 0;
+    auto drive = [&](float engine, std::vector<float>& oL, std::vector<float>& oR,
+                     int settle_ms) -> bool {
+        GpuNamProcessor proc;
+        pulp::state::StateStore store;
+        prepare_proc(proc, store, SR, BLOCK, engine);
+        if (engine == 1.0f && !proc.gpu_engine_active()) { proc.release(); return false; }
+        pulp::midi::MidiBuffer mi, mo;
+        pulp::format::ProcessContext pctx;
+        pctx.sample_rate = SR; pctx.num_samples = static_cast<int>(BLOCK);
+        std::vector<float> l(BLOCK), r(BLOCK), ol(BLOCK), orr(BLOCK);
+        for (int b = 0; b < nblocks; ++b) {
+            for (std::size_t i = 0; i < BLOCK; ++i) {
+                l[i] = inL[b * BLOCK + i];
+                r[i] = inR[b * BLOCK + i];
+            }
+            const float* ip[2] = {l.data(), r.data()};
+            float* op[2] = {ol.data(), orr.data()};
+            pulp::audio::BufferView<const float> iv(ip, 2, BLOCK);
+            pulp::audio::BufferView<float> ov(op, 2, BLOCK);
+            proc.process(ov, iv, mi, mo, pctx);
+            if (settle_ms > 0) std::this_thread::sleep_for(std::chrono::milliseconds(settle_ms));
+            oL.insert(oL.end(), ol.begin(), ol.end());
+            oR.insert(oR.end(), orr.begin(), orr.end());
+        }
+        if (engine == 1.0f) {
+            const auto s = proc.gpu_block_stats();
+            blocks = static_cast<long>(s.first);
+            misses = static_cast<long>(s.second);
+        }
+        proc.release();
+        return true;
+    };
+
+    std::vector<float> cpuL, cpuR, gpuL, gpuR;
+    drive(0.0f, cpuL, cpuR, 0);  // per-channel CPU reference (independent by construction)
+    if (!drive(1.0f, gpuL, gpuR, 12)) {
+        WARN("GPU engine unavailable — skipping stereo-independence test (CPU path covered).");
+        return;
+    }
+    // The compared output must be genuinely GPU-produced: a missed block is filled
+    // by the per-channel INDEPENDENT CPU oracle, which would mask a GPU-side channel
+    // collision (the outputs would look independent because they came from the CPU
+    // fallback, not the shared device). Require the GPU produced the majority of
+    // blocks so the independence claim is about the shared-device path.
+    INFO("GPU blocks=" << blocks << " misses=" << misses);
+    REQUIRE(blocks > 0);
+    REQUIRE(misses * 2 < blocks);
+
+    const int skip = 12 * static_cast<int>(BLOCK);
+    const int len = 14 * static_cast<int>(BLOCK);
+    const int maxlag = 4 * static_cast<int>(BLOCK);
+    const double ll = best_lag_xcorr(gpuL, cpuL, skip, len, maxlag);  // ch0 GPU vs ch0 CPU
+    const double rr = best_lag_xcorr(gpuR, cpuR, skip, len, maxlag);  // ch1 GPU vs ch1 CPU
+    const double rl = best_lag_xcorr(gpuR, cpuL, skip, len, maxlag);  // ch1 GPU vs ch0 CPU (collision)
+    INFO("L->L=" << ll << " R->R=" << rr << " R->L(cross)=" << rl);
+    REQUIRE(ll > 0.99);   // channel 0 reproduces its own reference
+    REQUIRE(rr > 0.99);   // channel 1 reproduces ITS OWN reference (the earlier defect was here)
+    REQUIRE(rr > rl);     // channel 1 is not running channel 0's stream (plan-slot isolation)
+}
+
 TEST_CASE("GPU NAM switches Engine CPU->GPU->CPU live at fixed latency", "[nam][gpu]") {
     constexpr std::size_t BLOCK = GpuNamProcessor::kInternalBlock;
     constexpr double SR = 48000.0;
@@ -960,9 +1042,9 @@ TEST_CASE("GPU NAM resamples around an off-rate host", "[nam][resample]") {
 
 TEST_CASE("GPU NAM cabinet swap is click-free", "[nam][ir]") {
     // Swapping cabinets while audio flows must not step-discontinuity the output:
-    // the swapper hands the new IR to the running convolver in place, preserving
-    // its overlap history. A hard engine swap (zeroed overlap) would spike the
-    // sample-to-sample delta at the change.
+    // the processor crossfades the outgoing cabinet's output into the incoming one
+    // over a short window. A hard swap (the new IR's response beginning mid-signal)
+    // would spike the sample-to-sample delta at the change.
     constexpr double SR = 48000.0;
     constexpr std::size_t BLOCK = 512;
     const auto dir = std::filesystem::temp_directory_path();
@@ -1032,6 +1114,116 @@ TEST_CASE("GPU NAM cabinet swap is click-free", "[nam][ir]") {
 
     std::filesystem::remove(irA);
     std::filesystem::remove(irB);
+}
+
+TEST_CASE("GPU NAM survives rapid consecutive cabinet swaps", "[nam][ir]") {
+    // Swapping cabinets twice inside one crossfade window exercises the 2-engine
+    // invariant: the worker must serialize the second swap behind the first fade
+    // rather than start a second (which would leak or dangle the outgoing engine).
+    // The stream must stay finite and click-free across both changes, and end on
+    // the last-requested cabinet (not wedged mid-fade).
+    constexpr double SR = 48000.0;
+    constexpr std::size_t BLOCK = 512;
+    const auto dir = std::filesystem::temp_directory_path();
+    const std::string irA = (dir / "gpu_nam_rap_a.wav").string();
+    const std::string irB = (dir / "gpu_nam_rap_b.wav").string();
+    const std::string irC = (dir / "gpu_nam_rap_c.wav").string();
+    std::vector<float> a(300, 0.0f), b(300, 0.0f), c(300, 0.0f);
+    a[0] = 1.0f;  a[29] = 0.5f;  for (std::size_t i = 0; i < a.size(); ++i) a[i] += 0.3f * std::exp(-0.012f * i) * std::sin(0.18f * i);
+    b[0] = 0.8f;  b[71] = -0.6f; for (std::size_t i = 0; i < b.size(); ++i) b[i] += 0.4f * std::exp(-0.005f * i) * std::sin(0.06f * i);
+    c[0] = -0.9f; c[53] = 0.55f; for (std::size_t i = 0; i < c.size(); ++i) c[i] += 0.35f * std::exp(-0.008f * i) * std::cos(0.11f * i);
+    write_ir_wav(irA, a);
+    write_ir_wav(irB, b);
+    write_ir_wav(irC, c);
+
+    GpuNamProcessor proc;
+    pulp::state::StateStore store;
+    proc.set_state_store(&store);
+    proc.define_parameters(store);
+    store.set_value(kInputGain, 3.0f);
+    store.set_value(kMix, 100.0f);
+    store.set_value(kBypass, 0.0f);
+    store.set_value(kEngine, 0.0f);
+    proc.load_ir(irA);
+    pulp::format::PrepareContext ctx;
+    ctx.sample_rate = SR; ctx.max_buffer_size = static_cast<int>(BLOCK);
+    ctx.input_channels = 2; ctx.output_channels = 2;
+    proc.prepare(ctx);
+
+    pulp::midi::MidiBuffer mi, mo;
+    pulp::format::ProcessContext pctx; pctx.sample_rate = SR; pctx.num_samples = static_cast<int>(BLOCK);
+    std::vector<float> l(BLOCK), r(BLOCK), ol(BLOCK), orr(BLOCK);
+    std::vector<float> out;
+    const int nblocks = 120;
+    std::size_t swap_at = 0;
+    double phase = 0.0;
+    const double dp = 2.0 * M_PI * 330.0 / SR;
+    for (int blk = 0; blk < nblocks; ++blk) {
+        for (std::size_t i = 0; i < BLOCK; ++i) { l[i] = r[i] = 0.3f * std::sin(phase); phase += dp; }
+        if (blk == nblocks / 3) {
+            proc.load_ir(irB);
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));  // worker stages B
+            swap_at = out.size();
+        }
+        if (blk == nblocks / 3 + 2) {
+            proc.load_ir(irC);   // second swap arrives while A→B is still fading
+        }
+        const float* ip[2] = {l.data(), r.data()};
+        float* op[2] = {ol.data(), orr.data()};
+        pulp::audio::BufferView<const float> iv(ip, 2, BLOCK);
+        pulp::audio::BufferView<float> ov(op, 2, BLOCK);
+        proc.process(ov, iv, mi, mo, pctx);
+        // Give the worker time to drain B's fade and pick up the deferred C swap.
+        if (blk >= nblocks / 3 + 2 && blk < nblocks / 3 + 8)
+            std::this_thread::sleep_for(std::chrono::milliseconds(15));
+        for (std::size_t i = 0; i < BLOCK; ++i) out.push_back(ol[i]);
+    }
+    proc.release();
+
+    auto max_delta = [&](std::size_t lo, std::size_t hi) {
+        double m = 0.0;
+        for (std::size_t i = lo + 1; i < hi && i < out.size(); ++i)
+            m = std::max(m, std::abs(static_cast<double>(out[i]) - out[i - 1]));
+        return m;
+    };
+    REQUIRE(swap_at > BLOCK * 4);
+    for (float v : out) REQUIRE(std::isfinite(v));
+    const double baseline = max_delta(BLOCK * 2, swap_at - BLOCK);
+    const double post = max_delta(swap_at, out.size());
+    REQUIRE(baseline > 0.0);
+    INFO("baseline maxΔ=" << baseline << " post-swaps maxΔ=" << post);
+    CHECK(post < 4.0 * baseline);   // neither swap steps the output
+
+    // The plugin didn't wedge mid-fade: the tail is still a live, non-silent amp.
+    double tail_energy = 0.0;
+    for (std::size_t i = out.size() - BLOCK; i < out.size(); ++i) tail_energy += out[i] * out[i];
+    CHECK(tail_energy > 0.0);
+
+    std::filesystem::remove(irA);
+    std::filesystem::remove(irB);
+    std::filesystem::remove(irC);
+}
+
+TEST_CASE("GPU NAM crossfade never blends an IR engine against itself", "[nam][ir]") {
+    // The worker publishes the outgoing engine (ir_prev_) then the incoming one
+    // (ir_active_), so for one instant both atomics hold the SAME outgoing engine.
+    // If apply_ir crossfaded there, it would blend that engine against itself (a
+    // no-op) while advancing the fade counter against the old cabinet — and if the
+    // worker stalled through the whole fade window, the new cabinet would later
+    // publish with no crossfade left: the click the feature exists to remove.
+    // should_crossfade() gates that: it only fades between two DISTINCT non-null
+    // engines. This pins the predicate deterministically (the live race is a
+    // sub-microsecond window the threaded swap tests cannot reliably hit).
+    int e0 = 0, e1 = 0;  // stand-ins for two distinct engine addresses
+    const void* engA = &e0;
+    const void* engB = &e1;
+    // No swap in flight: prev is null → run active at full gain, no fade.
+    REQUIRE_FALSE(GpuNamProcessor::should_crossfade(engA, nullptr));
+    REQUIRE_FALSE(GpuNamProcessor::should_crossfade(nullptr, nullptr));
+    // Mid-publish transient: both slots hold the outgoing engine → NO fade.
+    REQUIRE_FALSE(GpuNamProcessor::should_crossfade(engA, engA));
+    // Fully published: incoming ≠ outgoing → crossfade proceeds.
+    REQUIRE(GpuNamProcessor::should_crossfade(engB, engA));
 }
 
 TEST_CASE("GPU NAM amps identically under any host block size", "[nam]") {

@@ -19,20 +19,27 @@ response generated for this example — not a third-party capture.
 `README-content.txt` is the note the installer places alongside the samples it
 installs to `/Library/Application Support/GPU NAM/`.
 
-The `.nam` file format and the WaveNet / LSTM architectures are the open,
-MIT-licensed Neural Amp Modeler standard
+The `.nam` file format and its architectures are the open, MIT-licensed Neural
+Amp Modeler standard
 (https://github.com/sdatkinson/neural-amp-modeler,
 https://github.com/sdatkinson/NeuralAmpModelerCore). Pulp's inference
-(`examples/gpu-nam/nam_model.hpp`, `nam_lstm.hpp`) and GPU forward
+(`src/nam_model.hpp`, `nam_a2.hpp`, `nam_convnet.hpp`, `nam_lstm.hpp`,
+`nam_linear.hpp`, `keras_runtime.hpp`) and GPU forward
 (`GpuCompute::wavenet_forward`) are independent implementations of those
 public architectures; these `.nam` files are the only third-party artifacts.
 
-## A note on NAM Architecture 2 (A2)
+## Supported model architectures
 
-These are **A1** (original WaveNet) and LSTM captures. GPU NAM's engine
-implements the standard A1 WaveNet and LSTM architectures only. NAM's newer
-**A2** architecture (LeakyReLU activations, a convolutional head, mixed kernel
-sizes per layer array, grouped convolutions, and packed-slimmable Full/Lite
-sizing) is a distinct architecture GPU NAM does not yet model — such files are
-rejected cleanly at load rather than mis-rendered. To source loadable captures
-online, use TONE3000's "A1 – Legacy" architecture filter.
+GPU NAM's CPU engine loads the full `.nam` architecture set:
+
+- **WaveNet A1** — the original architecture (CPU + an opt-in GPU engine).
+- **WaveNet A2** — the newer architecture (LeakyReLU activations, a convolutional
+  head, mixed kernel sizes per layer array, grouped convolutions, and
+  packed-slimmable Full/Lite sizing). Detected at load and routed to a dedicated
+  A2 forward — **A2 captures load and render**; the GPU engine covers A1 only, so
+  A2 runs on the CPU engine.
+- **ConvNet**, **LSTM**, and **Linear** `.nam` captures.
+- **RTNeural / Keras** `.json` captures (GRU / LSTM / Dense) via a separate engine.
+
+The models bundled here happen to be A1 and LSTM captures, but any of the above
+load. TONE3000 captures in either the A1 or A2 architecture are compatible.

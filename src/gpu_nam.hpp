@@ -28,10 +28,15 @@ public:
         return prepare_with(*owned_gpu_, model, block_size);
     }
 
-    // Prepare against a caller-owned GpuCompute (e.g. one sharing a device with
-    // a render surface). The caller keeps ownership of `gpu`.
+    // Prepare against a caller-owned GpuCompute (e.g. one shared by both stereo
+    // channels, or one sharing a device with a render surface). The caller keeps
+    // ownership of `gpu`. `instance` selects an independent plan slot on that
+    // device — plans are keyed by (block_size, instance), so two GpuNam sharing
+    // one device MUST pass distinct instances (0, 1, …) or their forwards clobber
+    // each other. The core "keeps two instances independent on one device" test
+    // pins that isolation.
     bool prepare_with(render::GpuCompute& gpu, const NamModel& model,
-                      std::uint32_t block_size) {
+                      std::uint32_t block_size, std::uint32_t instance = 0) {
         const std::vector<LayerArrayConfig>& cfg = model.arrays();
         if (cfg.empty()) return false;
 
@@ -58,16 +63,18 @@ public:
 
         gpu_ = &gpu;
         block_size_ = block_size;
+        instance_ = instance;
         return gpu.prepare_wavenet(specs_.data(), static_cast<std::uint32_t>(specs_.size()),
                                model.weights_data(),
                                static_cast<std::uint32_t>(model.weights_size()),
-                               block_size, model.head_scale());
+                               block_size, model.head_scale(), instance);
     }
 
     // Run one mono block through the GPU forward (streaming-continuous across
-    // calls). `n` must equal the prepared block size.
+    // calls). `n` must equal the prepared block size. Uses this GpuNam's own plan
+    // slot (`instance_`), so a shared device keeps each channel's history separate.
     bool forward(const float* in, float* out, std::uint32_t n) {
-        return gpu_ != nullptr && gpu_->wavenet_forward(in, out, n);
+        return gpu_ != nullptr && gpu_->wavenet_forward(in, out, n, instance_);
     }
 
     std::uint32_t block_size() const { return block_size_; }
@@ -79,6 +86,7 @@ private:
     std::vector<render::GpuCompute::WavenetLayerArraySpec> specs_;
     std::vector<std::vector<std::uint32_t>> dilations_;  // stable storage for spec ptrs
     std::uint32_t block_size_ = 0;
+    std::uint32_t instance_ = 0;   // plan slot on gpu_ (distinct per shared channel)
 };
 
 }  // namespace pulp::examples::nam
