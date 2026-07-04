@@ -1567,3 +1567,103 @@ TEST_CASE("GPU NAM streams ConvNet and Linear captures end-to-end", "[nam][e2e]"
         "\"weights\":[0.5,0.1]}";
     stream_and_check(linear, "linear", nam::NamRuntime::Arch::Linear);
 }
+
+namespace {
+// A packed SlimmableContainer with two memoryless identity variants (Lite = gain
+// `lo`, Full = gain `hi`) so a size selection is a pure output-gain change the
+// test can assert on without prewarm / latency bookkeeping. No loudness metadata,
+// so the default Normalized output mode is a no-op (= Raw) and the model gain is
+// the only thing scaling the signal.
+std::string slim_container_nam(float lo, float hi) {
+    auto variant = [](float g) {
+        char b[32]; std::snprintf(b, sizeof(b), "%.8g", g);
+        return std::string(
+            "{\"architecture\":\"WaveNet\",\"sample_rate\":48000,\"config\":{\"layers\":[{"
+            "\"input_size\":1,\"condition_size\":1,\"channels\":1,\"bottleneck\":1,"
+            "\"kernel_sizes\":[1],\"dilations\":[1],"
+            "\"activation\":[{\"type\":\"LeakyReLU\",\"negative_slope\":1.0}],"
+            "\"head\":{\"out_channels\":1,\"kernel_size\":1,\"bias\":true}}],\"head_scale\":1.0},"
+            "\"weights\":[1,") + b + ",0,0,1,0,1,0,1]}";
+    };
+    return std::string("{\"architecture\":\"SlimmableContainer\",\"sample_rate\":48000,\"config\":{"
+        "\"submodels\":[{\"max_value\":0.5,\"model\":") + variant(lo) +
+        "},{\"max_value\":1.0,\"model\":" + variant(hi) + "}]},\"weights\":[]}";
+}
+
+// Render `nblocks` of a 300 Hz tone through a fresh CPU-engine processor with the
+// given initial Slim size (applied synchronously by prepare()), returning the
+// channel-0 output RMS.
+double slim_rms(const std::string& path, float size, double sr, std::size_t block, int nblocks) {
+    GpuNamProcessor proc;
+    pulp::state::StateStore store;
+    proc.set_state_store(&store);
+    proc.define_parameters(store);
+    store.set_value(kInputGain, 0.0f);
+    store.set_value(kOutputGain, 0.0f);
+    store.set_value(kMix, 100.0f);
+    store.set_value(kBypass, 0.0f);
+    store.set_value(kEngine, 0.0f);
+    store.set_value(kSize, size);           // BEFORE prepare -> synchronous variant select
+    proc.load_model(path);                  // BEFORE prepare -> synchronous load
+    pulp::format::PrepareContext ctx;
+    ctx.sample_rate = sr; ctx.max_buffer_size = (int)block;
+    ctx.input_channels = 2; ctx.output_channels = 2;
+    proc.prepare(ctx);
+    CHECK(proc.model_variant_count() == 2);
+    Driver d(proc, block, sr);
+    std::vector<float> sig(block);
+    double acc = 0; std::size_t cnt = 0;
+    for (int b = 0; b < nblocks; ++b) {
+        for (std::size_t i = 0; i < block; ++i)
+            sig[i] = 0.3f * std::sin(2.0 * M_PI * 300.0 * (b * block + i) / sr);
+        const auto o = d.block_io(sig, 0);
+        // Skip the first block (priming latency) so the RMS reflects settled output.
+        if (b > 0) for (float v : o) { acc += (double)v * v; ++cnt; }
+    }
+    proc.release();
+    return std::sqrt(acc / std::max<std::size_t>(1, cnt));
+}
+}  // namespace
+
+TEST_CASE("GPU NAM Slim size selects a SlimmableContainer variant end to end", "[gpu-nam][a2][slim]") {
+    // Lite = 2x, Full = 3x (memoryless). Selecting Full vs Lite at load time must
+    // scale the settled output by ~3/2. This is the plugin-level proof that the
+    // Slim knob reaches the CPU engine, not just the NamA2 container in isolation.
+    constexpr std::size_t BLOCK = GpuNamProcessor::kInternalBlock;
+    const auto path = (std::filesystem::temp_directory_path() / "gpu_nam_slim_plugin.nam").string();
+    std::ofstream(path, std::ios::binary) << slim_container_nam(2.0f, 3.0f);
+
+    const double full = slim_rms(path, 1.0f, 48000.0, BLOCK, 6);
+    const double lite = slim_rms(path, 0.0f, 48000.0, BLOCK, 6);
+    REQUIRE(full > 1e-4);
+    REQUIRE(lite > 1e-4);
+    // Full/Lite output-gain ratio is the model gain ratio 3/2, independent of the
+    // (identical) surrounding chain.
+    CHECK(std::abs(full / lite - 1.5) < 0.03);
+
+    // The Slim param DEFAULTS to Lite (0.0) — matching NeuralAmpModelerPlugin — so a
+    // freshly loaded slimmable model runs the smaller variant unless the user opts
+    // up to Full. Render at the param's own default and confirm it tracks Lite.
+    float default_size = 0.0f;
+    {
+        GpuNamProcessor probe;
+        pulp::state::StateStore ps;
+        probe.set_state_store(&ps);
+        probe.define_parameters(ps);
+        default_size = ps.get_value(kSize);
+    }
+    const double def = slim_rms(path, default_size, 48000.0, BLOCK, 6);
+    CHECK(std::abs(def - lite) < 1e-4);
+    std::filesystem::remove(path);
+}
+
+TEST_CASE("GPU NAM defaults Output Mode to Normalized and Slim to Lite (parity with NAM)", "[gpu-nam]") {
+    // NeuralAmpModelerPlugin defaults OutputMode to Normalized (a Raw default left a
+    // quiet capture sounding weak) and the Slim knob to 0.0 = the smallest variant.
+    GpuNamProcessor proc;
+    pulp::state::StateStore store;
+    proc.set_state_store(&store);
+    proc.define_parameters(store);
+    CHECK(store.get_value(kOutputMode) == 1.0f);
+    CHECK(store.get_value(kSize) == 0.0f);
+}

@@ -166,6 +166,40 @@ TEST_CASE("A2 SlimmableContainer defaults to full, set_size selects a variant", 
     std::filesystem::remove(path);
 }
 
+TEST_CASE("NamRuntime exposes SlimmableContainer size selection", "[nam][a2][runtime]") {
+    // The Slim plugin knob drives NamRuntime::set_size/variant_count, not NamA2
+    // directly; this pins that dispatch. Same two memoryless variants (Lite 2x,
+    // Full 3x) as the NamA2 case, routed through the runtime loader.
+    const std::string lite = a2_submodel(1, {1}, {1}, 1.0f, 1,
+                                         {1.0f, 2.0f, 0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 0.0f, 1.0f});
+    const std::string full = a2_submodel(1, {1}, {1}, 1.0f, 1,
+                                         {1.0f, 3.0f, 0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 0.0f, 1.0f});
+    const std::string path = write_temp("gpu_nam_rt_slim.nam",
+                                        a2_container({{0.5, lite}, {1.0, full}}));
+    NamRuntime rt;
+    std::string err;
+    REQUIRE(load_nam_runtime(path, rt, &err));
+    REQUIRE(rt.variant_count() == 2);
+    rt.reset();
+    CHECK_THAT(rt.process_sample(1.0f), WithinAbs(3.0f, 1e-6));   // default = Full
+    CHECK(rt.set_size(0.3));                                      // -> Lite
+    CHECK(rt.active_variant() == 0);
+    CHECK_THAT(rt.process_sample(1.0f), WithinAbs(2.0f, 1e-6));
+    CHECK_FALSE(rt.set_size(0.4));                                // still Lite, no change
+    std::filesystem::remove(path);
+
+    // A single-variant model (bare A2 WaveNet) reports one variant and set_size is
+    // inert, so the plugin hides the Slim control and never rebuilds for it.
+    const std::string one = write_temp("gpu_nam_rt_single.nam",
+                                       a2_submodel(1, {1}, {1}, 0.1f, 1,
+                                                   {1, 2, 0, 0, 1, 0, 1, 0, 1}));
+    NamRuntime rt1;
+    REQUIRE(load_nam_runtime(one, rt1, &err));
+    CHECK(rt1.variant_count() == 1);
+    CHECK_FALSE(rt1.set_size(0.2));
+    std::filesystem::remove(one);
+}
+
 TEST_CASE("A2 set_size resets the re-activated variant's conv history", "[nam][a2]") {
     // Each variant carries a one-sample memory: output[n] = 2*x[n-1] + 3*x[n]
     // (identity layer, head kernel=2, taps [2,3]). The bug this pins: switching

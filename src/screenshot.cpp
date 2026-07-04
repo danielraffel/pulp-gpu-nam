@@ -29,11 +29,15 @@ int main(int argc, char** argv) {
     const char* out = "/tmp/gpu_nam_ui.png";
     bool want_gpu = false;
     bool want_settings = false;
+    bool want_slim_info = false;
+    std::string model_path;
     for (int i = 1; i < argc; ++i) {
         const std::string arg(argv[i]);
         if (arg == "--gpu") want_gpu = true;
         else if (arg == "--raster") want_gpu = false;
         else if (arg == "--settings") want_settings = true;
+        else if (arg == "--slim-info") want_slim_info = true;
+        else if (arg == "--model" && i + 1 < argc) model_path = argv[++i];
         else if (!arg.empty() && arg[0] != '-') out = argv[i];
     }
 
@@ -47,6 +51,9 @@ int main(int argc, char** argv) {
     store.set_value(examples::kBypass, 0.0f);
     const bool gpu_engine = std::getenv("GN_GPU") != nullptr;
     store.set_value(examples::kEngine, gpu_engine ? 1.0f : 0.0f);
+    // Optional explicit model (e.g. a SlimmableContainer to exercise the Slim row).
+    // Requested BEFORE prepare() so it loads synchronously.
+    if (!model_path.empty()) proc.load_model(model_path);
 
     constexpr int BLOCK = 512;
     constexpr double SR = 48000.0;
@@ -95,7 +102,10 @@ int main(int argc, char** argv) {
 
     auto v = proc.create_view();
     if (want_settings)
-        if (auto* ui = dynamic_cast<examples::GpuNamUi*>(v.get())) ui->show_settings(true);
+        if (auto* ui = dynamic_cast<examples::GpuNamUi*>(v.get())) {
+            ui->show_settings(true);
+            if (want_slim_info) ui->show_slim_info(true);
+        }
     const bool ok = view::render_to_file(*v, 600, 400, out, 2.0f, backend);
     std::printf("GPU NAM editor screenshot [%s]: %s -> %s\n",
                 backend == ScreenshotBackend::gpu ? "gpu" : "raster",

@@ -106,6 +106,11 @@ enum GpuNamParams : state::ParamID {
     // loudness to the user's kCalibrationLevel instead of the fixed reference).
     kOutputMode         = 12,
     kCalibrationLevel   = 13, // Calibrated-mode target loudness, dBFS
+    // Slim size selector for packed SlimmableContainer models (A2-Full/Lite/...):
+    // 0 = smallest/cheapest variant, 1 = Full (default, highest fidelity). Inert
+    // for single-variant models. The engine is rebuilt off the audio thread on a
+    // change, so this is a coarse quality/CPU trade, not a per-block modulation.
+    kSize               = 14,
 };
 
 // Target output loudness (dBFS) the Normalize mode aims for, and the maximum
@@ -177,15 +182,25 @@ public:
                              .range = {0.0f, 1.0f, 1.0f, 1.0f}});
         store.add_parameter({.id = kEQActive, .name = "EQ", .unit = "",
                              .range = {0.0f, 1.0f, 1.0f, 1.0f}});
-        // Output mode: 0 = Raw (default; the shipped level is exactly the model's),
-        // 1 = Normalized (retarget the model's loudness to the fixed reference),
+        // Output mode: 0 = Raw (the shipped level is exactly the model's), 1 =
+        // Normalized (retarget the model's loudness to the fixed -18 dBFS reference),
         // 2 = Calibrated (retarget to the user's Cal Level). Stepped 0..2; 0/1 keep
-        // the old binary Normalize meaning so saved sessions are preserved.
+        // the old binary Normalize meaning so saved sessions are preserved. Default
+        // is Normalized (1) to match NeuralAmpModelerPlugin: a Raw default leaves a
+        // quiet capture (e.g. -24 LUFS) sounding weak next to other plugins, and a
+        // model without loudness metadata makes Normalized a no-op (= Raw) anyway.
         store.add_parameter({.id = kOutputMode, .name = "Output Mode", .unit = "",
-                             .range = {0.0f, 2.0f, 0.0f, 1.0f}});
+                             .range = {0.0f, 2.0f, 1.0f, 1.0f}});
         // Calibrated-mode reference loudness (dBFS); only affects Calibrated mode.
         store.add_parameter({.id = kCalibrationLevel, .name = "Cal Level", .unit = "dB",
                              .range = {-36.0f, 0.0f, kNormalizeTargetDb, 0.0f}});
+        // Slim size for SlimmableContainer models. Default 0 selects the smallest
+        // (Lite) variant — matching NeuralAmpModelerPlugin's Slim default (0.0): for
+        // published A2 captures the larger variants can sound harsher/hotter, so the
+        // reference ships the smallest as the default and lets the user opt up to
+        // Full. Inert (the control is hidden) unless the model packs >1 variant.
+        store.add_parameter({.id = kSize, .name = "Slim", .unit = "",
+                             .range = {0.0f, 1.0f, 0.0f, 0.0f}});
     }
 
     // Total latency, FIXED at prepare() for the prepared lifetime: the re-block
@@ -372,6 +387,12 @@ public:
         return model_arch_;
     }
 
+    /// Number of selectable size variants in the loaded model. > 1 only for a packed
+    /// SlimmableContainer; the UI shows the Slim control only then. UI-thread safe.
+    int model_variant_count() const {
+        return model_variant_count_.load(std::memory_order_acquire);
+    }
+
     /// True when apply_ir should crossfade between two distinct published IR
     /// engines. A null outgoing pointer means no swap is in flight; equal pointers
     /// mean the worker is mid-publish — it stores ir_prev_ then ir_active_, so for
@@ -507,6 +528,16 @@ public:
         direct_wet_.assign(max_block, 0.0f);
         direct_drive1_.assign(max_block, 0.0f);
         direct_wet1_.assign(max_block, 0.0f);
+        // Apply the saved Slim size to the freshly loaded model BEFORE it is copied
+        // into model_ and the CPU engine, so the first block already runs the chosen
+        // variant (default 1.0 = Full is a no-op). SlimmableContainer models only.
+        model_variant_count_.store(ok ? model.variant_count() : 1, std::memory_order_release);
+        if (ok && model.variant_count() > 1) {
+            last_applied_size_ = state().get_value(kSize);
+            model.set_size(last_applied_size_);
+        } else {
+            last_applied_size_ = 1.0f;
+        }
         {
             std::lock_guard<std::mutex> lock(model_mutex_);
             model_ = model;
@@ -1419,6 +1450,15 @@ private:
                             "GPU NAM: model '{}' was captured at {} Hz but the pipeline is pinned "
                             "to {} Hz; its response is shifted. Reopen the plugin to re-pin.",
                             gpu_nam_basename(path), msr, internal_rate_);
+                    // Honor the current Slim size on the new model before it is copied
+                    // into the engine (default 1.0 = Full is a no-op). Multi-variant only.
+                    model_variant_count_.store(m.variant_count(), std::memory_order_release);
+                    if (m.variant_count() > 1) {
+                        last_applied_size_ = state().get_value(kSize);
+                        m.set_size(last_applied_size_);
+                    } else {
+                        last_applied_size_ = 1.0f;
+                    }
                     {
                         std::lock_guard<std::mutex> lock(model_mutex_);
                         model_ = m;
@@ -1433,6 +1473,29 @@ private:
                     recompute_transfer_curve();
                 } else {
                     runtime::log_error("GPU NAM: load_model('{}') failed ({}).", path, err);
+                }
+            }
+
+            // Slim size change? Only a packed SlimmableContainer has selectable
+            // variants; for everything else the Slim knob is inert. Selecting a new
+            // variant rebuilds + prewarms the CPU engine off this worker thread (a
+            // coarse quality/CPU trade, never a per-block modulation). A2 is CPU-only
+            // (not gpu_eligible), so there is no GPU stack to rebuild here.
+            if (loaded_ok_ && model_variant_count_.load(std::memory_order_acquire) > 1) {
+                const float want_size = state().get_value(kSize);
+                if (want_size != last_applied_size_) {
+                    last_applied_size_ = want_size;
+                    nam::NamRuntime m;
+                    bool changed = false;
+                    {
+                        std::lock_guard<std::mutex> lock(model_mutex_);
+                        changed = model_.set_size(want_size);
+                        if (changed) m = model_;
+                    }
+                    if (changed) {
+                        rebuild_cpu_engine(m);
+                        recompute_transfer_curve();
+                    }
                 }
             }
 
@@ -1601,6 +1664,11 @@ private:
     nam::NamRuntime model_;
     std::string model_name_ = "(no model)";
     std::string model_arch_ = "none";
+    // Slim/size selector state. model_variant_count_ is published for the UI (>1 =
+    // show the Slim control); last_applied_size_ is worker-thread-only, tracking the
+    // size baked into the live engine so the worker rebuilds only on a real change.
+    std::atomic<int> model_variant_count_{1};
+    float last_applied_size_ = 1.0f;
     std::atomic<bool> user_model_loaded_{false};
     TransferCurve transfer_curve_{};
     std::atomic<std::uint32_t> model_generation_{0};

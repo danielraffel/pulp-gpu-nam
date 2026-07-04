@@ -560,12 +560,15 @@ public:
     int variant_count() const { return static_cast<int>(variants_.size()); }
     int active_variant() const { return active_; }
 
-    // Select a size in [0,1]: the smallest variant whose max_value >= size, else
-    // the largest. Returns true iff the active variant changed.
+    // Select a size in [0,1]: the first variant whose max_value strictly exceeds
+    // size, else the largest (Full). This matches the reference container's index
+    // rule exactly (`size < max_value`), so a given size selects the same variant
+    // as the reference — size 0 picks the smallest (Lite), size 1 picks Full.
+    // Returns true iff the active variant changed.
     bool set_size(double size) {
         int pick = static_cast<int>(variants_.size()) - 1;
         for (std::size_t i = 0; i < variants_.size(); ++i)
-            if (variants_[i].max_value >= size) { pick = static_cast<int>(i); break; }
+            if (size < variants_[i].max_value) { pick = static_cast<int>(i); break; }
         const bool changed = pick != active_;
         active_ = pick;
         if (changed)

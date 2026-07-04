@@ -20,7 +20,7 @@ builds the matching network, and streams audio through it.
 | Architecture | Status | Notes |
 |---|---|---|
 | **WaveNet (A1)** | Supported | The original/standard NAM capture. Runs on the CPU engine and, opt-in, on the fused GPU engine. |
-| **NAM Architecture 2 (A2)** | Supported | NAM's next-gen architecture (the default for new captures on TONE3000): LeakyReLU activations, a windowed convolutional head, mixed per-layer kernel sizes, and a `SlimmableContainer` of Full/Lite sizes selected at run time. CPU engine; validated bit-exact (max abs diff ~6e-8) against the reference inference engine on a real A2 capture. GPU forward not yet wired (CPU-only for now). |
+| **NAM Architecture 2 (A2)** | Supported | NAM's next-gen architecture (the default for new captures on TONE3000): LeakyReLU activations, a windowed convolutional head, mixed per-layer kernel sizes, and a `SlimmableContainer` of Full/Lite sizes selected at run time via the **Slim** control. CPU engine; validated bit-exact (max abs diff ~6e-8 prewarmed; ~7e-8 through a full DI render) against the reference inference engine on a real A2 capture. GPU forward not yet wired (CPU-only for now). |
 | **ConvNet** | Supported | Feedforward conv blocks (kernel 2, optional batch-norm, activation) + a linear head. CPU engine; validated bit-exact (~3e-8) against the reference. GPU forward not yet wired. |
 | **LSTM** | Supported | The recurrent NAM option. CPU engine (recurrence runs sequentially, so no GPU path); validated bit-approximately (~7e-8) against the reference. |
 | **Linear** | Supported | A single causal FIR + bias. CPU engine. |
@@ -57,10 +57,36 @@ phase-aligned.
 ## Signal chain
 
 Input → **noise gate** (on the drive) → **neural model** → **tone stack**
-(Bass / Middle / Treble) → **cabinet IR** (optional convolution) → output, with a
-matched dry-path delay so a dry/wet blend stays aligned. The cabinet IR is loaded
-from a WAV / AIFF / FLAC file, summed to mono, resampled to the session rate, and
-unit-energy normalized.
+(Bass / Middle / Treble) → **cabinet IR** (optional convolution) → **output mode**
+make-up → output, with a matched dry-path delay so a dry/wet blend stays aligned.
+The cabinet IR is loaded from a WAV / AIFF / FLAC file, summed to mono, resampled
+to the session rate, and unit-energy normalized.
+
+## Output level (Output Mode)
+
+The **Output Mode** control in Settings sets how the model's level is presented:
+
+- **Raw** — the model's native captured level, no make-up.
+- **Normalized** *(default)* — retargets the capture's loudness metadata to a fixed
+  −18 dBFS reference so different models sit at a consistent level. Matches
+  NeuralAmpModelerPlugin's default; a model with no loudness metadata falls back to
+  Raw. Captures are often quiet (e.g. −24 dBFS), so a Raw default reads as "weak"
+  and invites over-cranking — Normalized avoids that.
+- **Calibrated** — retargets to the user's Cal Level instead of the fixed reference.
+
+## Slim size (SlimmableContainer models)
+
+A packed `SlimmableContainer` capture (A2 Full/Lite) exposes a **Slim** selector in
+Settings — one segment per size variant (`Lite … Full`). The size→variant mapping
+follows the reference container exactly (`size < max_value` picks the first variant
+above, else Full), and the default is the **smallest (Lite)** variant to match
+NeuralAmpModelerPlugin's `Slim` default of 0.0 — published captures' larger variants
+can sound harsher/hotter, so the reference ships the smallest and lets you opt up to
+Full. It is the same amp at a different channel count (a coarse CPU/fidelity trade,
+not a tone change). Selecting a variant rebuilds and prewarms the engine off the
+audio thread, so the swap is glitch-free. Single-variant models hide the control. An
+ⓘ next to the selector explains, succinctly, why the larger variant is not always
+"better" — so a Lite default never reads as the plugin sounding wrong.
 
 ## The reusable inference substrate
 
