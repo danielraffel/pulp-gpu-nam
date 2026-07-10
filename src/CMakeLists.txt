@@ -167,7 +167,7 @@ if(TARGET pulp::render AND TARGET pulp::gpu-audio)
     # Standalone plists), the custom AU plist (below), and the processor
     # descriptor (GPU_NAM_VERSION_STRING compile define) so the three can't drift
     # — the AU plist silently froze at 1.0.0 before this was centralized.
-    set(GPU_NAM_VERSION "1.2.4")
+    set(GPU_NAM_VERSION "1.2.5")
     add_compile_definitions(GPU_NAM_VERSION_STRING="${GPU_NAM_VERSION}")
 
     pulp_add_plugin(GpuNam
