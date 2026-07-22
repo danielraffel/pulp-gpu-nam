@@ -2,7 +2,7 @@
 
 A [Neural Amp Modeler](https://github.com/sdatkinson/neural-amp-modeler) (`.nam`)
 player that runs amp captures on the **GPU**, built on
-[Pulp](https://github.com/danielraffel/pulp). Signed and notarized for macOS
+[Pulp](https://github.com/Generous-Corp/pulp). Signed and notarized for macOS
 (Apple Silicon).
 
 ![GPU NAM editor — amp transfer curve, output spectrum, Input / Output / Mix, Engine (CPU/GPU) and Bypass, with a live GPU status line](src/docs/editor.png)
