@@ -37,6 +37,9 @@ endif()
 # test tree.
 option(GPU_NAM_BUILD_TESTS "Build GPU NAM's own test suite" ON)
 
+option(GPU_NAM_BUILD_GPU_AUDIO_CAPABILITY_PROBE
+    "Build the optional Pulp GPU-audio capability compatibility probe" ON)
+
 # Where the Pulp SDK comes from: the vendored ./pulp submodule built from source
 # (default), or a pre-installed Pulp SDK consumed via find_package(Pulp). The
 # installed-SDK path lets a release build link a versioned, prebuilt SDK instead
