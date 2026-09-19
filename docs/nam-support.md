@@ -137,6 +137,17 @@ inference primitive that ships in the Pulp SDK. This repo owns the format loader
 the CPU oracle, the DSP face, the editor, and the packaging; Pulp owns rendering,
 the audio graph, and that GPU primitive.
 
+## SDK capability compatibility
+
+The `gpu-nam-gpu-audio-capability-probe` CTest is a small consumer-side check for
+newer installed Pulp SDKs. When the SDK exports the backend-neutral
+`GpuAudioTransport::capability_report()` surface, it verifies that an unprepared
+transport reports `Unavailable` / `Unknown` and never infers shared memory from
+target presence alone. Older SDK pins print `capability_report=unavailable` and
+continue using the existing staged transport and CPU fallback. The probe uses no
+private shared-I/O headers, so it does not make shared-memory support a build
+requirement for GPU NAM.
+
 ## Honesty notes
 
 - The rendering is GPU-accelerated in **both** GPU NAM (Skia Graphite on Dawn) and

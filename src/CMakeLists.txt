@@ -71,6 +71,17 @@ if(TARGET pulp::render)
     endif()
 endif()
 
+# Bounded SDK compatibility probe. Newer Pulp SDKs may expose the authenticated
+# backend-neutral capability report; older SDKs keep the existing staged path.
+# The probe is deliberately independent of private shared-I/O headers and stays
+# green on older pins while making capability absence explicit in its output.
+if(GPU_NAM_BUILD_GPU_AUDIO_CAPABILITY_PROBE AND TARGET pulp::gpu-audio)
+    add_executable(gpu-nam-gpu-audio-capability-probe gpu_audio_capability_probe.cpp)
+    target_link_libraries(gpu-nam-gpu-audio-capability-probe PRIVATE pulp::gpu-audio)
+    add_test(NAME gpu-nam-gpu-audio-capability-probe
+        COMMAND gpu-nam-gpu-audio-capability-probe)
+endif()
+
 # Exact, reference-faithful NAM WaveNet CPU inference + .nam loader. This is the
 # oracle the GPU primitive is validated against; it only needs choc::json (via
 # pulp::runtime), not the GPU/render stack, so it builds independently of pulp::render.
