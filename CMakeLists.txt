@@ -127,13 +127,14 @@ if(GPU_NAM_BUILD_TESTS)
     )
     FetchContent_MakeAvailable(Catch2)
     list(APPEND CMAKE_MODULE_PATH "${catch2_SOURCE_DIR}/extras")
-    # Enable testing directly rather than via include(CTest): the Pulp submodule
-    # (add_subdirectory(pulp), above) is built with PULP_BUILD_TESTS=OFF, which
-    # leaves the cached BUILD_TESTING=OFF. The stock CTest module only calls
-    # enable_testing() when BUILD_TESTING is ON, so include(CTest) would silently
-    # register zero tests. GPU NAM gates its own suite on GPU_NAM_BUILD_TESTS.
-    enable_testing()
     include(Catch)
+endif()
+
+# The capability probe is independent of Catch2 and the broader test suite.
+# Call enable_testing directly because the vendored SDK can leave BUILD_TESTING
+# disabled even when one of this project's test options is enabled.
+if(GPU_NAM_BUILD_TESTS OR GPU_NAM_BUILD_GPU_AUDIO_CAPABILITY_PROBE)
+    enable_testing()
 endif()
 
 add_subdirectory(src)
