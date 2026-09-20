@@ -54,6 +54,12 @@
 
 #include <pulp/format/processor.hpp>
 #include <pulp/gpu_audio/gpu_audio_transport.hpp>
+#if __has_include(<pulp/gpu_audio/gpu_audio_capability.hpp>)
+#include <pulp/gpu_audio/gpu_audio_capability.hpp>
+#define GPU_NAM_HAS_GPU_AUDIO_CAPABILITY_REPORT 1
+#else
+#define GPU_NAM_HAS_GPU_AUDIO_CAPABILITY_REPORT 0
+#endif
 #include <pulp/runtime/log.hpp>
 #include <pulp/audio/impulse_response.hpp>
 #include <pulp/signal/biquad.hpp>
@@ -347,6 +353,13 @@ public:
     struct GpuStatus {
         bool active = false;
         std::string backend;
+        // These fields describe the public SDK capability contract observed
+        // while the GPU stack was prepared off the audio thread. They do not
+        // identify shared memory; provider/path details remain private to Pulp.
+        bool capability_report_available = false;
+        bool capability_ready = false;
+        bool fallback_available = false;
+        std::uint32_t prepared_lead_blocks = 0;
         std::uint64_t blocks = 0;
         std::uint64_t misses = 0;
         double avg_us = 0.0;
@@ -359,6 +372,10 @@ public:
         g.active = gpu_engine_active();
         if (!g.active || !current_stack_) return g;
         if (current_stack_->node) g.backend = current_stack_->node->backend();
+        g.capability_report_available = current_stack_->capability_report_available;
+        g.capability_ready = current_stack_->capability_ready;
+        g.fallback_available = current_stack_->fallback_available;
+        g.prepared_lead_blocks = current_stack_->prepared_lead_blocks;
         if (current_stack_->transport) {
             const auto s = current_stack_->transport->stats();
             g.blocks = s.produced_blocks;
@@ -853,6 +870,10 @@ private:
         std::unique_ptr<nam::NamModel> model;
         std::unique_ptr<GpuNamCloudNode> node;
         std::unique_ptr<gpu_audio::GpuAudioTransport> transport;
+        bool capability_report_available = false;
+        bool capability_ready = false;
+        bool fallback_available = false;
+        std::uint32_t prepared_lead_blocks = 0;
     };
 
     // Map the raw Engine parameter (0=CPU, 1=GPU, 2=Auto) to the effective engine
@@ -1194,6 +1215,19 @@ private:
         cfg.ring_blocks = 8;
         cfg.run_worker_thread = true;
         if (!stack->transport->prepare(stack->node.get(), cfg)) return nullptr;
+#if GPU_NAM_HAS_GPU_AUDIO_CAPABILITY_REPORT
+        // Query only after prepare(), on this non-real-time stack-building
+        // worker. The report is a read-only SDK contract snapshot; it does not
+        // expose or imply private shared-memory provider access.
+        const auto report = stack->transport->capability_report();
+        stack->capability_report_available = true;
+        stack->capability_ready =
+            report.prepared &&
+            report.eligibility == gpu_audio::GpuAudioEligibility::Eligible;
+        stack->fallback_available = report.fallback_available;
+        stack->prepared_lead_blocks = report.prepared_lead_blocks;
+        if (!stack->capability_ready || !stack->fallback_available) return nullptr;
+#endif
         return stack;
     }
 
