@@ -438,6 +438,19 @@ TEST_CASE("GPU NAM GPU engine reproduces the CPU engine", "[nam][gpu]") {
     REQUIRE(status.blocks == stats.first);
     REQUIRE(status.budget_us > 0.0);
     REQUIRE(status.rt_percent > 0.0);
+#if GPU_NAM_HAS_GPU_AUDIO_CAPABILITY_REPORT
+    // The plugin observes the public capability snapshot only after its
+    // off-thread stack preparation. A generic NAM node is staged today; this
+    // assertion deliberately does not infer or claim shared-memory execution.
+    REQUIRE(status.capability_report_available);
+    REQUIRE(status.capability_ready);
+    REQUIRE(status.fallback_available);
+    REQUIRE(status.prepared_lead_blocks == 1);
+#else
+    // Older SDK pins retain the existing transport path and simply have no
+    // capability-report surface.
+    CHECK_FALSE(status.capability_report_available);
+#endif
 
     for (float v : gpu_out) REQUIRE(std::isfinite(v));
     double energy = 0.0;
