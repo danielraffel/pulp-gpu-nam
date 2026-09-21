@@ -73,8 +73,10 @@ endif()
 
 # Bounded SDK compatibility probe. Newer Pulp SDKs may expose the authenticated
 # backend-neutral capability report; older SDKs keep the existing staged path.
-# The probe is deliberately independent of private shared-I/O headers and stays
-# green on older pins while making capability absence explicit in its output.
+# When the public convolver node is available, the probe also prepares a real
+# transport and reports the post-prepare provider selection. `--require-shared`
+# turns that report into a strict shared-provider assertion for an exact-capability
+# campaign; the default CTest mode remains portable and fail-closed.
 if(GPU_NAM_BUILD_GPU_AUDIO_CAPABILITY_PROBE AND TARGET pulp::gpu-audio)
     add_executable(gpu-nam-gpu-audio-capability-probe gpu_audio_capability_probe.cpp)
     target_link_libraries(gpu-nam-gpu-audio-capability-probe PRIVATE pulp::gpu-audio)
