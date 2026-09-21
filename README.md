@@ -96,6 +96,35 @@ Pulp is built lean from the submodule (its own examples, tests, and CLIs are
 skipped when it's consumed this way); the first build compiles the Pulp SDK, so
 it takes a while. CLAP + Standalone need no external SDK.
 
+### Build against an installed Pulp SDK
+
+An installed GPU-enabled SDK can be used when you want to test the plugin
+against the same package that downstream users receive, without rebuilding the
+Pulp submodule. Set `PULP_SDK_PREFIX` to the SDK installation prefix and use a
+separate build directory:
+
+```bash
+export PULP_SDK_PREFIX=/absolute/path/to/pulp-sdk
+cmake -S . -B build-installed -DCMAKE_BUILD_TYPE=Release \
+  -DGPU_NAM_USE_INSTALLED_PULP=ON \
+  -DGPU_NAM_BUILD_TESTS=ON \
+  -DGPU_NAM_BUILD_GPU_AUDIO_CAPABILITY_PROBE=ON \
+  -DCMAKE_PREFIX_PATH="$PULP_SDK_PREFIX" \
+  -DPulp_DIR="$PULP_SDK_PREFIX/lib/cmake/Pulp"
+cmake --build build-installed --target GpuNam_Standalone GpuNam_CLAP \
+  gpu-nam-gpu-audio-capability-probe
+ctest --test-dir build-installed --output-on-failure \
+  -R 'gpu-nam|clap-dlopen|auval|pluginval'
+```
+
+The SDK must contain the `Pulp::render` and `Pulp::gpu-audio` targets. The
+capability probe is deliberately a compatibility check: it records whether
+the installed SDK exposes the backend-neutral GPU-audio capability report and
+does not infer shared memory from target presence. A report of
+`device shared:false` or an unavailable capability is a valid result for an
+older or staged provider; it means the plugin is using its CPU fallback and
+does not prove that the SDK's unified-memory path is active.
+
 Build products land under `build/` (`CLAP/GpuNam.clap`, `VST3/GpuNam.vst3`,
 `AU/GpuNam.component`, and the standalone app). The bundles are self-contained and
 relocatable — the build fails if any bundle bakes a build-tree dylib path.
