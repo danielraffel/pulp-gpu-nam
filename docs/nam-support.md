@@ -148,6 +148,12 @@ continue using the existing staged transport and CPU fallback. The probe uses no
 private shared-I/O headers, so it does not make shared-memory support a build
 requirement for GPU NAM.
 
+When the GPU stack is prepared, GPU NAM queries the same report off the audio
+thread and keeps the stack only when the transport is prepared, eligible, and
+advertises its declared CPU fallback. The live status snapshot exposes that
+readiness and the prepared lead to diagnostics; it does not expose private
+provider handles or claim that the staged NAM path is shared-memory execution.
+
 ## Honesty notes
 
 - The rendering is GPU-accelerated in **both** GPU NAM (Skia Graphite on Dawn) and
