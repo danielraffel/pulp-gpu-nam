@@ -13,12 +13,25 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shlex
 import subprocess
 import sys
 import tempfile
 import time
 from typing import Any
+
+
+GPU_PLUGIN_TEST_NAMES = (
+    "GPU NAM GPU engine reproduces the CPU engine",
+    "GPU NAM GPU engine keeps stereo channels independent on the shared device",
+    "GPU NAM switches Engine CPU->GPU->CPU live at fixed latency",
+)
+CAPABILITY_TEST_NAME = "gpu-nam-gpu-audio-capability-probe"
+GPU_SKIP_MARKERS = (
+    "gpu engine unavailable",
+    "no gpu device; skipping",
+)
 
 
 def sha256(path: Path) -> str:
@@ -54,19 +67,77 @@ def git_value(source: Path, *args: str) -> str:
 
 
 def find_pulp_config(prefix: Path) -> Path | None:
-    matches = sorted(prefix.rglob("PulpConfig.cmake"))
-    return matches[0] if matches else None
+    """Return only the canonical installed-SDK config.
+
+    Recursive discovery can accidentally bind a receipt to a nested staging
+    tree or a different SDK copied below the requested prefix.  The install
+    contract is the CMake package path below the prefix, so require that exact
+    path instead.
+    """
+    candidate = prefix / "lib" / "cmake" / "Pulp" / "PulpConfig.cmake"
+    return candidate if candidate.is_file() else None
+
+
+def file_record(path: Path) -> dict[str, Any]:
+    record: dict[str, Any] = {"path": str(path), "exists": path.is_file()}
+    if path.is_file():
+        record["sha256"] = sha256(path)
+    return record
 
 
 def executable_record(build_dir: Path, name: str) -> dict[str, Any]:
     candidates = [build_dir / "src" / name,
                   build_dir / "src" / "Release" / name]
-    path = next((candidate for candidate in candidates if candidate.is_file()),
-                candidates[0])
-    record: dict[str, Any] = {"path": str(path), "exists": path.is_file()}
-    if path.is_file():
-        record["sha256"] = sha256(path)
+    existing = [candidate for candidate in candidates if candidate.is_file()]
+    # A reused multi-config/single-config tree may contain two artifacts.  Do
+    # not silently hash whichever happens to sort first.
+    path = existing[0] if len(existing) == 1 else candidates[0]
+    record = file_record(path)
+    record["ambiguous"] = len(existing) > 1
+    if len(existing) > 1:
+        record["candidates"] = [str(candidate) for candidate in existing]
     return record
+
+
+def ctest_inventory(build_dir: Path, log: Path) -> dict[str, Any]:
+    return run([
+        "ctest", "--test-dir", str(build_dir), "-C", "Release",
+        "--show-only=json-v1",
+    ], cwd=build_dir, log=log)
+
+
+def inventory_names(inventory_log: Path) -> set[str]:
+    try:
+        data = json.loads(inventory_log.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return set()
+    return {
+        str(test.get("name"))
+        for test in data.get("tests", [])
+        if isinstance(test, dict) and test.get("name")
+    }
+
+
+def ctest_regex() -> str:
+    names = (*GPU_PLUGIN_TEST_NAMES, CAPABILITY_TEST_NAME)
+    return "^(" + "|".join(re.escape(name) for name in names) + ")$"
+
+
+def ctest_has_gpu_skip(log: Path) -> bool:
+    try:
+        output = log.read_text(encoding="utf-8").lower()
+    except OSError:
+        return True
+    return any(marker in output for marker in GPU_SKIP_MARKERS)
+
+
+def ctest_selected_names_present(log: Path) -> bool:
+    try:
+        output = log.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    return all(name in output for name in (*GPU_PLUGIN_TEST_NAMES,
+                                           CAPABILITY_TEST_NAME))
 
 
 def main() -> int:
@@ -88,6 +159,10 @@ def main() -> int:
 
     build_dir = (args.build_dir or
                  Path(tempfile.mkdtemp(prefix="gpu-nam-installed-sdk-"))).resolve()
+    if args.build_dir and build_dir.exists() and any(build_dir.iterdir()):
+        parser.error(
+            f"refusing reused non-empty build directory (receipt provenance): {build_dir}"
+        )
     build_dir.mkdir(parents=True, exist_ok=True)
     log_dir = build_dir / "receipt-logs"
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -111,20 +186,34 @@ def main() -> int:
 
     # Follow compilation with ctest so the receipt records actual test
     # execution rather than compilation alone.
+    inventory = ctest_inventory(build_dir, log_dir / "ctest-inventory.json")
+    inventory_names_seen = inventory_names(log_dir / "ctest-inventory.json")
+    expected_names = set((*GPU_PLUGIN_TEST_NAMES, CAPABILITY_TEST_NAME))
+    inventory_complete = expected_names.issubset(inventory_names_seen)
+
     ctest = run([
         "ctest", "--test-dir", str(build_dir), "-C", "Release",
-        "-R", "^(gpu-nam-plugin-test|gpu-nam-gpu-audio-capability-probe)$",
-        "--output-on-failure",
+        "-R", ctest_regex(), "--verbose", "--output-on-failure",
     ], cwd=source, log=log_dir / "ctest.log")
 
     config = find_pulp_config(prefix)
-    model = source / "models" / "example.nam"
+    model = source / "src" / "models" / "example.nam"
     executables = {
         name: executable_record(build_dir, name)
         for name in ("gpu-nam-plugin-test", "gpu-nam-gpu-audio-capability-probe")
     }
     source_status = git_value(source, "status", "--porcelain")
-    executable_build_ok = all(item["exists"] for item in executables.values())
+    executable_build_ok = all(
+        item["exists"] and not item.get("ambiguous", False)
+        for item in executables.values()
+    )
+    tests_executed = (
+        inventory["exit_code"] == 0
+        and inventory_complete
+        and ctest["exit_code"] == 0
+        and ctest_selected_names_present(log_dir / "ctest.log")
+        and not ctest_has_gpu_skip(log_dir / "ctest.log")
+    )
     receipt = {
         "schema": "pulp.gpu-nam.installed-sdk-receipt.v1",
         "source": {
@@ -140,18 +229,25 @@ def main() -> int:
             "provider_identity": "reported only by the public capability probe;"
                                  " shared provider adoption is not inferred",
         },
-        "model": executable_record(model),
+        "model": file_record(model),
         "build": {
             "directory": str(build_dir),
             "configure": configure,
             "build": build,
+            "ctest_inventory": inventory,
             "ctest": ctest,
+            "ctest_inventory_names": sorted(inventory_names_seen),
+            "ctest_inventory_complete": inventory_complete,
+            "ctest_selected_names_present": ctest_selected_names_present(
+                log_dir / "ctest.log"
+            ),
+            "ctest_gpu_skip_detected": ctest_has_gpu_skip(log_dir / "ctest.log"),
         },
         "executables": executables,
         "result": {
             "installed_sdk_consumer": all(
-                step["exit_code"] == 0 for step in (configure, build, ctest)
-            ) and source_status == "" and config is not None and model.is_file()
+                step["exit_code"] == 0 for step in (configure, build)
+            ) and tests_executed and source_status == "" and config is not None and model.is_file()
             and executable_build_ok,
             "shared_provider_adoption": "unproven",
         },
