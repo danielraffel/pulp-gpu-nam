@@ -154,6 +154,15 @@ advertises its declared CPU fallback. The live status snapshot exposes that
 readiness and the prepared lead to diagnostics; it does not expose private
 provider handles or claim that the staged NAM path is shared-memory execution.
 
+The prepared-program test also contains a consumer-only shared-provider
+admission fixture when the SDK exposes `gpu_audio_program.hpp` (the typed
+program contract introduced by Pulp #8843). It validates a synthetic Dawn
+shared-memory descriptor against a matching capability report, then rejects a
+staged path or a different provider identity. The fixture does not construct a
+provider or execute audio, so a passing test is an authentication check rather
+than evidence that GPU NAM has a shared WaveNet implementation. Older SDK pins
+skip this fixture and continue to use the staged path above.
+
 ## Honesty notes
 
 - The rendering is GPU-accelerated in **both** GPU NAM (Skia Graphite on Dawn) and
