@@ -88,6 +88,15 @@ constexpr GpuNamProgramError validate_gpu_nam_program(
       capability.fallback_policy != program.miss_policy ||
       capability.prepared_lead_blocks != program.algorithmic_lead_blocks)
     return GpuNamProgramError::CapabilityMismatch;
+  // A shared-memory program must be authenticated against the same provider
+  // identity that prepared its resources.  Staged consumers may leave the
+  // provider unspecified, but a SharedRequired WaveNet descriptor cannot
+  // silently accept a different backend (or a descriptor without provider
+  // owned resources) and then report that shared execution is available.
+  if (program.path == gpu_audio::GpuAudioExecutionPath::SharedMemory &&
+      (program.provider == gpu_audio::GpuAudioProvider::Unknown ||
+       capability.provider != program.provider || !program.provider_owned_resources))
+    return GpuNamProgramError::CapabilityMismatch;
   if (program.miss_policy == gpu_audio::MissPolicy::CpuFallback &&
       !capability.fallback_available)
     return GpuNamProgramError::CapabilityMismatch;
