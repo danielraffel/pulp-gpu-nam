@@ -65,6 +65,13 @@ done
 grep -q "SharedRequired" "$sdk_prefix/include/pulp/gpu_audio/gpu_convolver.hpp" || { echo "installed gpu_convolver.hpp has no ProviderPolicy::SharedRequired (#8848)" >&2; exit 1; }
 grep -q "GpuAudioProgramDescriptor" "$sdk_prefix/include/pulp/gpu_audio/gpu_audio_program.hpp" || { echo "installed gpu_audio_program.hpp has no typed program descriptor (#8843)" >&2; exit 1; }
 
+sha256_file() {
+    shasum -a 256 "$1" | awk '{print $1}'
+}
+pulp_config_sha256=$(sha256_file "$pulp_config")
+program_header_sha256=$(sha256_file "$sdk_prefix/include/pulp/gpu_audio/gpu_audio_program.hpp")
+convolver_header_sha256=$(sha256_file "$sdk_prefix/include/pulp/gpu_audio/gpu_convolver.hpp")
+
 probe_src=$(mktemp "${TMPDIR:-/tmp}/gpu-nam-sdk-probe.XXXXXX.cpp")
 trap 'rm -f "$probe_src"' EXIT
 cat >"$probe_src" <<'PROBE'
@@ -88,17 +95,33 @@ echo "[4/4] running consumer contract tests"
 ctest --test-dir "$build_dir" --output-on-failure -R 'gpu-nam-(prepared-program|gpu-audio-capability-probe)'
 
 source_head=$(git -C "$repo_root" rev-parse HEAD)
-python3 - "$receipt" "$source_head" "$sdk_commit" "$sdk_prefix" "$pulp_config" "$build_dir" "$jobs" <<'PY'
+python3 - "$receipt" "$source_head" "$sdk_commit" "$sdk_prefix" "$pulp_config" "$pulp_config_sha256" "$program_header_sha256" "$convolver_header_sha256" "$build_dir" "$jobs" <<'PY'
 import json
 import pathlib
 import sys
-receipt, source_head, sdk_commit, sdk_prefix, pulp_config, build_dir, jobs = sys.argv[1:]
+(
+    receipt,
+    source_head,
+    sdk_commit,
+    sdk_prefix,
+    pulp_config,
+    pulp_config_sha256,
+    program_header_sha256,
+    convolver_header_sha256,
+    build_dir,
+    jobs,
+) = sys.argv[1:]
 data = {
     "schema": "gpu-nam.installed-sdk-gpu-audio-validation.v1",
     "source_head": source_head,
     "pulp_sdk_commit": sdk_commit,
     "sdk_prefix": sdk_prefix,
     "pulp_config": pulp_config,
+    "artifacts": {
+        "PulpConfig.cmake": pulp_config_sha256,
+        "gpu_audio_program.hpp": program_header_sha256,
+        "gpu_convolver.hpp": convolver_header_sha256,
+    },
     "build_dir": build_dir,
     "build_jobs": int(jobs),
     "checks": {
