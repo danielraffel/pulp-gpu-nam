@@ -1220,6 +1220,12 @@ private:
         // worker. The report is a read-only SDK contract snapshot; it does not
         // expose or imply private shared-memory provider access.
         const auto report = stack->transport->capability_report();
+        // Authenticate the node's typed preparation metadata against the
+        // transport snapshot.  This is still a staged path; the check is
+        // deliberately fail-closed and does not infer shared-memory access.
+        if (nam::validate_gpu_nam_program(stack->node->prepared_program(), report) !=
+            nam::GpuNamProgramError::None)
+            return nullptr;
         stack->capability_report_available = true;
         stack->capability_ready =
             report.prepared &&
