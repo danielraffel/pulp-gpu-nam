@@ -50,6 +50,18 @@ to WaveNet A1.
   CPU fallback on any worker miss. LSTM is recurrent and runs CPU-only; selecting a
   GPU device for an LSTM model keeps the CPU engine.
 
+An experimental validation adapter for Pulp's shared-memory provider can be built
+with `-DGPU_NAM_EXPERIMENTAL_SHARED_WAVENET_SESSION=ON`. It is deliberately OFF
+by default and does not change the released submodule pin. The option requires a
+Pulp checkout containing the provisional `GpuWaveNetSession` API, currently the
+Pulp #8885 development head. Use an exact landed SHA once that PR merges rather
+than pinning this branch to a moving head. The adapter creates one opaque mono
+session per channel, keeps the existing `GpuAudioTransport` and continuously
+prepared CPU fallback, and waits only on the non-real-time worker for a bounded
+interval. It is useful for validating authenticated shared buffers, but it is not
+yet the final zero-copy callback architecture: the public session still copies
+into provider-owned slots and does not share one device across stereo sessions.
+
 Both engines report one fixed latency for the prepared lifetime, so switching
 engines live keeps the host's delay compensation correct and the dry/wet blend
 phase-aligned.

@@ -37,8 +37,15 @@ endif()
 # test tree.
 option(GPU_NAM_BUILD_TESTS "Build GPU NAM's own test suite" ON)
 
-option(GPU_NAM_BUILD_GPU_AUDIO_CAPABILITY_PROBE
-    "Build the optional Pulp GPU-audio capability compatibility probe" ON)
+# Validation-only bridge for Pulp's provisional opaque shared WaveNet session.
+# This remains OFF until the corresponding Pulp API lands. Enabling it requires
+# a Pulp checkout containing GpuWaveNetSession; the committed submodule pin
+# intentionally stays on the released legacy API.
+option(GPU_NAM_EXPERIMENTAL_SHARED_WAVENET_SESSION
+    "Build the provisional shared-memory WaveNet session adapter (default OFF)" OFF)
+if(GPU_NAM_EXPERIMENTAL_SHARED_WAVENET_SESSION)
+    add_compile_definitions(GPU_NAM_EXPERIMENTAL_SHARED_WAVENET_SESSION=1)
+endif()
 
 # Where the Pulp SDK comes from: the vendored ./pulp submodule built from source
 # (default), or a pre-installed Pulp SDK consumed via find_package(Pulp). The
@@ -127,14 +134,13 @@ if(GPU_NAM_BUILD_TESTS)
     )
     FetchContent_MakeAvailable(Catch2)
     list(APPEND CMAKE_MODULE_PATH "${catch2_SOURCE_DIR}/extras")
-    include(Catch)
-endif()
-
-# The capability probe is independent of Catch2 and the broader test suite.
-# Call enable_testing directly because the vendored SDK can leave BUILD_TESTING
-# disabled even when one of this project's test options is enabled.
-if(GPU_NAM_BUILD_TESTS OR GPU_NAM_BUILD_GPU_AUDIO_CAPABILITY_PROBE)
+    # Enable testing directly rather than via include(CTest): the Pulp submodule
+    # (add_subdirectory(pulp), above) is built with PULP_BUILD_TESTS=OFF, which
+    # leaves the cached BUILD_TESTING=OFF. The stock CTest module only calls
+    # enable_testing() when BUILD_TESTING is ON, so include(CTest) would silently
+    # register zero tests. GPU NAM gates its own suite on GPU_NAM_BUILD_TESTS.
     enable_testing()
+    include(Catch)
 endif()
 
 add_subdirectory(src)

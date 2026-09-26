@@ -31,6 +31,9 @@
 
 #include "gpu_nam.hpp"
 #include "gpu_nam_cloud_node.hpp"
+#if defined(GPU_NAM_EXPERIMENTAL_SHARED_WAVENET_SESSION)
+#include "gpu_nam_shared_session_node.hpp"
+#endif
 #include "nam_model.hpp"
 #include "nam_retire_list.hpp"
 #include "gpu_nam_license.hpp"
@@ -50,6 +53,12 @@
 // plists. Falls back for header-only / non-CMake builds.
 #ifndef GPU_NAM_VERSION_STRING
 #define GPU_NAM_VERSION_STRING "0.0.0-dev"
+#endif
+
+#if defined(GPU_NAM_EXPERIMENTAL_SHARED_WAVENET_SESSION)
+using GpuNamEngineNode = pulp::examples::GpuNamSharedSessionNode;
+#else
+using GpuNamEngineNode = pulp::examples::GpuNamCloudNode;
 #endif
 
 #include <pulp/format/processor.hpp>
@@ -868,7 +877,7 @@ private:
     // node.
     struct GpuStack {
         std::unique_ptr<nam::NamModel> model;
-        std::unique_ptr<GpuNamCloudNode> node;
+        std::unique_ptr<GpuNamEngineNode> node;
         std::unique_ptr<gpu_audio::GpuAudioTransport> transport;
         bool capability_report_available = false;
         bool capability_ready = false;
@@ -1204,7 +1213,7 @@ private:
     std::unique_ptr<GpuStack> build_gpu_stack(const nam::NamModel& model) {
         auto stack = std::make_unique<GpuStack>();
         stack->model = std::make_unique<nam::NamModel>(model);
-        stack->node = std::make_unique<GpuNamCloudNode>(
+        stack->node = std::make_unique<GpuNamEngineNode>(
             static_cast<std::uint32_t>(kChannels),
             static_cast<std::uint32_t>(kInternalBlock),
             static_cast<std::uint32_t>(sample_rate_), stack->model.get());
