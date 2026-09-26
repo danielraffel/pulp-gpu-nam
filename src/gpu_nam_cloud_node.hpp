@@ -18,6 +18,7 @@
 // when the worker falls behind or no device exists.
 
 #include "gpu_nam.hpp"
+#include "gpu_nam_prepared_program.hpp"
 #include "nam_model.hpp"
 
 #include <pulp/audio/buffer.hpp>
@@ -64,6 +65,7 @@ public:
     // model shape is unsupported on the GPU.
     bool prepare() override {
         if (!model_ || channels_ == 0 || channels_ > kNamChannels) return false;
+        prepared_program_ = {};
         // One device for all channels. If it can't be created, fail closed so the
         // processor routes the inline CPU engine (same contract as before).
         shared_gpu_ = render::GpuCompute::create();
@@ -88,7 +90,30 @@ public:
             cpu_[ch] = *model_;
             cpu_[ch].prewarm();
         }
+        // This is metadata for the prepared staged path.  It deliberately
+        // does not claim shared-memory execution or expose backend objects.
+        prepared_program_.kind = GpuNamProgramKind::WaveNet;
+        prepared_program_.channels = channels_;
+        prepared_program_.block_size = block_size_;
+        prepared_program_.sample_rate = sample_rate_;
+        prepared_program_.model_layers = static_cast<std::uint32_t>(model_->arrays().size());
+        prepared_program_.model_weights = static_cast<std::uint32_t>(model_->weights_size());
+        prepared_program_.receptive_field = static_cast<std::uint32_t>(model_->receptive_field());
+        prepared_program_.algorithmic_lead_blocks = GpuNamPreparedProgram::kPreparedLeadBlocks;
+        prepared_program_.pipeline_depth = GpuNamPreparedProgram::kPreparedPipelineDepth;
+        prepared_program_.provider_slots = channels_;
+        prepared_program_.path = gpu_audio::GpuAudioExecutionPath::Staged;
+        prepared_program_.provider = gpu_audio::GpuAudioProvider::Unknown;
+        prepared_program_.miss_policy = gpu_audio::MissPolicy::CpuFallback;
+        prepared_program_.provider_owned_resources = false;
+        prepared_program_.cpu_fallback_prepared = true;
         return true;
+    }
+
+    /// Host-side preparation metadata.  This remains valid until the next
+    /// prepare() call and contains no provider handles or executable state.
+    const GpuNamPreparedProgram& prepared_program() const noexcept {
+        return prepared_program_;
     }
 
     bool gpu_available() const {
@@ -154,6 +179,7 @@ private:
     std::unique_ptr<render::GpuCompute> shared_gpu_;
     std::array<nam::GpuNam, kNamChannels> gpu_{};
     std::array<nam::NamModel, kNamChannels> cpu_{};  // CpuFallback oracle (per channel)
+    GpuNamPreparedProgram prepared_program_{};
 };
 
 } // namespace pulp::examples
