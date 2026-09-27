@@ -426,13 +426,30 @@ public:
     // (it runs thousands of samples); never the audio thread.
     void prewarm() {
         reset();
-        // Margin past a full receptive field, clamped so a pathological model
-        // (huge dilations) can't turn prewarm into a multi-second stall. Real
-        // captures settle in a few thousand samples; the cap is far above that.
-        constexpr long long kMaxPrewarm = 1 << 18;   // 262144 samples
-        long long n = 2LL * receptive_field() + 512;
-        if (n < 0) n = 512;
-        if (n > kMaxPrewarm) n = kMaxPrewarm;
+        for (std::uint64_t i = 0; i < prewarm_sample_count(); ++i)
+            process_sample(0.0f);
+    }
+
+    std::uint64_t prewarm_sample_count() const noexcept {
+        constexpr std::uint64_t kMaxPrewarm = 1u << 18;
+        const auto requested = 2LL * receptive_field() + 512;
+        return static_cast<std::uint64_t>(std::min<long long>(
+            kMaxPrewarm, std::max<long long>(512, requested)));
+    }
+
+    std::uint64_t prewarm_block_count(std::uint32_t block_size) const noexcept {
+        if (block_size == 0) return 0;
+        return (prewarm_sample_count() + block_size - 1) / block_size;
+    }
+
+    // Block-transport adapters can only advance a resident causal stream in
+    // complete blocks.  Warm to the next block boundary so a GPU session and
+    // its CPU fallback begin from the same state rather than differing by the
+    // zero samples in a final partial warm-up block.
+    void prewarm_block_aligned(std::uint32_t block_size) {
+        if (block_size == 0) return;
+        reset();
+        const auto n = prewarm_block_count(block_size) * block_size;
         for (long long i = 0; i < n; ++i) process_sample(0.0f);
     }
 
