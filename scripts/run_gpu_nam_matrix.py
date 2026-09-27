@@ -9,7 +9,7 @@ def complete_sidecar(path, expected, lead):
   with path.open(newline='') as stream:
    for row in csv.DictReader(stream):
     scheduled=int(row['scheduled_ns']); start=int(row['start_ns']); end=int(row['end_ns']); deadline=int(row['deadline_ns'])
-    if int(row['block'])!=count or scheduled<=previous or deadline<=scheduled or end<start or row['selected'] not in ('priming','cpu_baseline','gpu_delivered','cpu_fallback'): return False
+    if int(row['block'])!=count or scheduled<=previous or deadline<=scheduled or end<start or row['selected'] not in ('priming','cpu_baseline','gpu_delivered','worker_output','cpu_fallback','silence','passthrough','invalid_rejected'): return False
     delivered=row['delivered_input_sequence']
     if count<lead:
      if delivered!='' or row['selected']!='priming': return False

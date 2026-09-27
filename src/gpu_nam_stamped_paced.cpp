@@ -1,4 +1,5 @@
 #include "gpu_nam_stamped_paced.hpp"
+#include "gpu_nam_paced_delivery.hpp"
 #include "gpu_nam_stamped_node.hpp"
 #include "gpu_nam_staged_diagnostic.hpp"
 #include <pulp/gpu_audio/gpu_audio_transport.hpp>
@@ -20,7 +21,7 @@ std::uint64_t nanoseconds(Clock::time_point t) {
 }
 struct Row {
     std::uint64_t scheduled = 0, start = 0, end = 0, deadline = 0;
-    const char* selected = "priming";
+    PacedSelection selected = PacedSelection::AccountingError;
 };
 }
 int run_stamped_paced(const nam::NamModel& model, unsigned frames, unsigned lead,
@@ -74,7 +75,9 @@ int run_stamped_paced(const nam::NamModel& model, unsigned frames, unsigned lead
     float* outs[channels]{};
     audio::BufferView<const float> in(ins, channels, frames);
     audio::BufferView<float> out(outs, channels, frames);
-    auto fallback_reads = [&]() { return node ? node->fallback_reads() : staged ? staged->fallback_reads() : 0; };
+    const auto initial_delivery = paced_delivery_counts(transport.delivery_snapshot());
+    PacedDeliveryCounts selected_counts{};
+    std::uint64_t accounting_errors = 0;
     const auto cpu_start = std::clock();
     if (cpu_start == std::clock_t(-1)) return 66;
     const auto origin = Clock::now();
@@ -89,7 +92,8 @@ int run_stamped_paced(const nam::NamModel& model, unsigned frames, unsigned lead
         row.scheduled = origin_ns + paced_offset_ns(b, frames);
         row.deadline = origin_ns + paced_offset_ns(b + 1, frames);
         std::this_thread::sleep_until(origin + std::chrono::nanoseconds(paced_offset_ns(b, frames)));
-        const auto fallback_before = fallback_reads();
+        const auto delivery_before = options.cpu_only ? PacedDeliveryCounts{} :
+            paced_delivery_counts(transport.delivery_snapshot());
         row.start = nanoseconds(Clock::now());
         if (options.cpu_only) {
             auto* slot = delay.data() + cursor * stride;
@@ -100,11 +104,20 @@ int run_stamped_paced(const nam::NamModel& model, unsigned frames, unsigned lead
             cursor = (cursor + 1) % lead;
         } else transport.process(in, out, frames);
         row.end = nanoseconds(Clock::now());
-        row.selected = b < lead ? "priming" : options.cpu_only ? "cpu_baseline" :
-            fallback_reads() == fallback_before ? "gpu_delivered" : "cpu_fallback";
+        if (options.cpu_only) {
+            row.selected = b < lead ? PacedSelection::Priming : PacedSelection::CpuBaseline;
+        } else {
+            row.selected = paced_delivery_selection(
+                delivery_before, paced_delivery_counts(transport.delivery_snapshot()));
+            if (!paced_record_delivery(selected_counts, row.selected)) ++accounting_errors;
+        }
     }
     const auto loop_end_ns = nanoseconds(Clock::now());
     const auto cpu_loop_end = std::clock();
+    const auto stopped_delivery = paced_delivery_counts(transport.delivery_snapshot());
+    const bool delivery_reconciled = options.cpu_only ||
+        (accounting_errors == 0 && paced_delivery_reconciles(
+            initial_delivery, stopped_delivery, selected_counts, blocks));
     const auto stats = transport.stats();
     const bool fenced_before_release = node && node->fenced();
     transport.release();
@@ -137,23 +150,20 @@ int run_stamped_paced(const nam::NamModel& model, unsigned frames, unsigned lead
     fprintf(sidecar,"block,delivered_input_sequence,scheduled_ns,start_ns,end_ns,deadline_ns,selected,callback_ns,start_lateness_ns,deadline_missed\n");
     for (std::uint64_t b=0;b<blocks;++b) {
         auto& row=rows[b]; const auto cost=row.end-row.start;
-        if (options.staged_gpu && std::string_view(row.selected)=="gpu_delivered" &&
-            !std::all_of(actual.begin()+b*stride, actual.begin()+(b+1)*stride, [](float v){return std::isfinite(v);}))
-            row.selected="gpu_forward_failed";
         const auto lateness=row.start>row.scheduled ? row.start-row.scheduled : 0;
-        gpu += std::string_view(row.selected)=="gpu_delivered";
-        fallback += std::string_view(row.selected)=="cpu_fallback";
+        gpu += row.selected == PacedSelection::GpuDelivered;
+        fallback += row.selected == PacedSelection::CpuFallback;
         late_starts += lateness!=0; deadline_misses += row.end>row.deadline;
         callback_ns+=cost; max_callback=std::max(max_callback,cost);
         fprintf(sidecar,"%llu,",(unsigned long long)b);
         if (b>=lead) fprintf(sidecar,"%llu",(unsigned long long)(b-lead));
         fprintf(sidecar,",%llu,%llu,%llu,%llu,%s,%llu,%llu,%d\n",
             (unsigned long long)row.scheduled,(unsigned long long)row.start,
-            (unsigned long long)row.end,(unsigned long long)row.deadline,row.selected,
+            (unsigned long long)row.end,(unsigned long long)row.deadline,paced_selection_name(row.selected),
             (unsigned long long)cost,(unsigned long long)lateness,int(row.end>row.deadline));
     }
     const bool io_ok=fflush(sidecar)==0 && !ferror(sidecar);
-    const bool passed=drained && io_ok && failed_forwards==0 && mismatches==0 && cpu_calls==blocks*channels;
+    const bool passed=drained && io_ok && delivery_reconciled && failed_forwards==0 && mismatches==0 && cpu_calls==blocks*channels;
     std::cout << "paced=1 engine=" << (options.cpu_only?"cpu":options.staged_gpu?"staged":"stamped")
         << " scheduling=ordinary_os_thread hard_realtime=0 sample_rate=48000 channels=2 frames=" << frames << " lead=" << lead
         << " input_blocks=" << inputs_count << " drain_blocks=" << lead << " measured_blocks=" << blocks
@@ -163,6 +173,15 @@ int run_stamped_paced(const nam::NamModel& model, unsigned frames, unsigned lead
         << " worker_poll_interval_us=" << (options.cpu_only ? 0 : std::clamp(frames * 1'000'000u / 48000u / 4u, 50u, 2000u))
         << " forced_fallback=" << options.force_fallback << " failed_gpu_forwards=" << failed_forwards
         << " cpu_model_calls=" << cpu_calls << " gpu_callbacks=" << gpu << " fallback_callbacks=" << fallback
+        << " selection_evidence=" << (options.cpu_only ? "cpu_delay_model_v1" : "transport_delivery_delta_v1")
+        << " selection_accounting_applicable=" << (!options.cpu_only)
+        << " selection_accounting_errors=" << accounting_errors
+        << " selection_accounting_ok=" << delivery_reconciled
+        << " worker_output_callbacks=" << selected_counts[1]
+        << " silence_callbacks=" << selected_counts[3]
+        << " passthrough_callbacks=" << selected_counts[4]
+        << " transport_priming_callbacks=" << selected_counts[5]
+        << " invalid_callbacks=" << selected_counts[6]
         << " worker_produced=" << stats.produced_blocks << " transport_misses=" << stats.miss_blocks
         << " fenced_before_release=" << fenced_before_release
         << " input_dropped_frames=" << stats.input_dropped_frames << " resynced_blocks=" << stats.resynced_blocks

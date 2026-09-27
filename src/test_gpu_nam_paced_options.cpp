@@ -1,4 +1,6 @@
 #include "gpu_nam_paced_options.hpp"
+#include "gpu_nam_paced_delivery.hpp"
+#include <string_view>
 #include <iostream>
 #include <limits>
 int main() {
@@ -35,5 +37,39 @@ int main() {
     if (!check(staged.valid(128,4))) return 15;
     staged.cpu_only=true;
     if (!check(!staged.valid(128,4))) return 16;
-    std::cout<<count<<" paced option/schedule/oracle controls passed\n";
+    const PacedDeliveryCounts empty{};
+    PacedDeliveryCounts totals{};
+    for (std::size_t i=0;i<empty.size();++i) {
+        auto after=totals; ++after[i];
+        const auto selected=paced_delivery_selection(totals,after);
+        if (!check(selected==static_cast<PacedSelection>(i))) return 17;
+        if (!check(paced_record_delivery(totals,selected)&&totals==after)) return 18;
+    }
+    if (!check(paced_delivery_reconciles(empty,totals,totals,7))) return 19;
+    if (!check(!paced_delivery_reconciles(empty,totals,totals,6))) return 20;
+    if (!check(!paced_delivery_reconciles(empty,totals,totals,8))) return 21;
+    if (!check(paced_delivery_selection(empty,empty)==PacedSelection::AccountingError)) return 22;
+    auto two=empty; two[0]=2;
+    if (!check(paced_delivery_selection(empty,two)==PacedSelection::AccountingError)) return 23;
+    two[0]=1; two[2]=1;
+    if (!check(paced_delivery_selection(empty,two)==PacedSelection::AccountingError)) return 24;
+    auto reset=totals; reset[0]=0;
+    if (!check(paced_delivery_selection(totals,reset)==PacedSelection::AccountingError)) return 25;
+    auto wrapped=empty; wrapped[0]=std::numeric_limits<std::uint64_t>::max();
+    if (!check(paced_delivery_selection(wrapped,empty)==PacedSelection::AccountingError)) return 26;
+    if (!check(!paced_record_delivery(totals,PacedSelection::AccountingError)&&
+               !paced_record_delivery(totals,PacedSelection::CpuBaseline))) return 27;
+    auto wrong=totals; --wrong[0]; ++wrong[1];
+    if (!check(!paced_delivery_reconciles(empty,totals,wrong,7))) return 28;
+    if (!check(!paced_delivery_reconciles(totals,empty,empty,0))) return 29;
+    if (!check(paced_delivery_reconciles(totals,totals,empty,0))) return 30;
+    if (!check(std::string_view(paced_selection_name(PacedSelection::WorkerOutput))=="worker_output"&&
+               std::string_view(paced_selection_name(PacedSelection::Silence))=="silence"&&
+               std::string_view(paced_selection_name(PacedSelection::CpuBaseline))=="cpu_baseline")) return 31;
+    struct Snapshot {
+        std::uint64_t gpu_blocks=1,worker_output_blocks=2,cpu_fallback_blocks=3,
+            silence_blocks=4,passthrough_blocks=5,priming_blocks=6,invalid_blocks=7;
+    };
+    if (!check(paced_delivery_counts(Snapshot{})==PacedDeliveryCounts{1,2,3,4,5,6,7})) return 32;
+    std::cout<<count<<" paced option/schedule/oracle/delivery controls passed\n";
 }

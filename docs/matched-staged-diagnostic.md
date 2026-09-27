@@ -33,7 +33,9 @@ Controls:
 - `--staged-gpu --inject-forward-failure`: simulate failure of every live staged
   forward. Worker output is poisoned and failed forwards counted; there is no
   hidden CPU replacement. Numerical acceptance must fail with exit 7. Nonfinite
-  selected results are labeled `gpu_forward_failed`, never `gpu_delivered`.
+  selected results retain their exact transport disposition (`worker_output` for
+  a generic staged node). `failed_gpu_forwards` and the numerical oracle report
+  forward failure independently; worker output is never labeled GPU delivery.
 
 Preparation failure exits 8. A failed or unsupported positive run gives no valid
 speedup comparison. Numerically correct fallback-only audio also gives no proof

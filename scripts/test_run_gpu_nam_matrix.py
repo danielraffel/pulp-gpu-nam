@@ -70,4 +70,14 @@ class T(unittest.TestCase):
   p.write_text(header+'0,,10,11,12,20,priming\n0,0,20,21,22,30,gpu_delivered\n'); self.assertFalse(m.complete_sidecar(p,2,1))
   p.write_text(header+'0,,10,11,12,20,priming\n1,1,20,21,22,30,gpu_delivered\n'); self.assertFalse(m.complete_sidecar(p,2,1))
   p.write_text(header+'0,0,10,11,12,20,priming\n1,0,20,21,22,30,gpu_delivered\n'); self.assertFalse(m.complete_sidecar(p,2,1))
+ def test_exact_transport_dispositions_are_preserved(self):
+  spec=importlib.util.spec_from_file_location('runner_exact_selection',HERE/'run_gpu_nam_matrix.py'); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+  with tempfile.TemporaryDirectory() as directory:
+   p=Path(directory)/'rows.csv'; header='block,delivered_input_sequence,scheduled_ns,start_ns,end_ns,deadline_ns,selected\n'
+   for selected in ('gpu_delivered','worker_output','cpu_fallback','silence','passthrough','invalid_rejected','cpu_baseline'):
+    p.write_text(header+'0,,10,11,12,20,priming\n1,0,20,21,22,30,'+selected+'\n')
+    self.assertTrue(m.complete_sidecar(p,2,1),selected)
+   for selected in ('accounting_error','unknown','gpu_forward_failed'):
+    p.write_text(header+'0,,10,11,12,20,priming\n1,0,20,21,22,30,'+selected+'\n')
+    self.assertFalse(m.complete_sidecar(p,2,1),selected)
 if __name__=='__main__': unittest.main()
