@@ -51,6 +51,11 @@ class GpuNamSharedSessionNode final : public gpu_audio::GpuAudioNode {
         return gpu_available() ? "Dawn shared WaveNet (experimental)" : std::string{};
     }
 
+    // Validation diagnostic: counts results whose public session disposition
+    // was GpuDelivered. This is separate from gpu_available(), which only
+    // proves that the session prepared successfully.
+    std::uint64_t gpu_delivered_blocks() const noexcept { return gpu_delivered_blocks_; }
+
   private:
     static constexpr std::uint32_t kNamChannels = 2;
     static constexpr std::uint64_t kWorkerWaitBudgetNs = 2'000'000;
@@ -68,6 +73,7 @@ class GpuNamSharedSessionNode final : public gpu_audio::GpuAudioNode {
     const nam::NamModel* model_ = nullptr;
     bool prepared_ = false;
     std::uint64_t sequence_ = 0;
+    std::uint64_t gpu_delivered_blocks_ = 0;
 
     std::vector<std::vector<std::uint32_t>> dilations_;
     std::vector<gpu_audio::GpuWaveNetLayerDescriptor> descriptors_;
