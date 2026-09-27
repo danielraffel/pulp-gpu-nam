@@ -11,18 +11,25 @@
 
 int main(int argc, char** argv) {
     unsigned lead = 2;
-    if (argc > 2) return 64;
-    if (argc == 2) {
+    unsigned frames = 32;
+    if (argc > 4) return 64;
+    if (argc >= 2) {
         const std::string arg = argv[1];
         const auto result = std::from_chars(arg.data(), arg.data() + arg.size(), lead);
         if (result.ec != std::errc{} || result.ptr != arg.data() + arg.size() ||
             (lead != 1 && lead != 2 && lead != 4 && lead != 8)) return 64;
     }
+    if (argc >= 3) {
+        const std::string arg = argv[2];
+        const auto result = std::from_chars(arg.data(), arg.data() + arg.size(), frames);
+        if (result.ec != std::errc{} || result.ptr != arg.data() + arg.size() ||
+            (frames != 32 && frames != 64 && frames != 128)) return 64;
+    }
     using namespace pulp;
-    constexpr unsigned frames = 32, channels = 2, blocks = 48;
+    constexpr unsigned channels = 2, blocks = 48;
     examples::nam::NamModel model;
     std::string error;
-    if (!examples::nam::load_nam(GPU_NAM_MODEL_PATH, model, &error)) return 1;
+    if (!examples::nam::load_nam(argc == 4 ? argv[3] : GPU_NAM_MODEL_PATH, model, &error)) return 1;
     if (examples::GpuNamStampedNode::create(model, 3, frames, 48000, lead) ||
         examples::GpuNamStampedNode::create(model, channels, frames, 48000, 0)) return 2;
     auto node = examples::GpuNamStampedNode::create(model, channels, frames, 48000, lead);
@@ -34,7 +41,11 @@ int main(int argc, char** argv) {
     std::array<examples::nam::NamModel, channels> oracle{model, model};
     for (auto& cpu : oracle) cpu.prewarm_block_aligned(frames);
     std::vector<float> history((blocks + lead) * channels * frames);
-    std::array<std::array<float, frames>, channels> input{}, output{};
+    std::array<std::vector<float>, channels> input{}, output{};
+    for (unsigned ch = 0; ch < channels; ++ch) {
+        input[ch].resize(frames);
+        output[ch].resize(frames);
+    }
     const float* ins[]{input[0].data(), input[1].data()};
     float* outs[]{output[0].data(), output[1].data()};
     audio::BufferView<const float> in(ins, channels, frames);
@@ -76,7 +87,7 @@ int main(int argc, char** argv) {
     const auto calls = node->cpu_model_calls();
     const auto misses = node->fallback_reads();
     if (!node->release()) return 6;
-    std::cout << "lead=" << lead << " max_error=" << max_error
+    std::cout << "frames=" << frames << " lead=" << lead << " max_error=" << max_error
               << " cpu_model_calls=" << calls << " fallback_reads=" << misses
               << " gpu_callbacks=" << gpu_callbacks
               << " worker_produced=" << stats.produced_blocks << '\n';
