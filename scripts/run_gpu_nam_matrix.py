@@ -15,7 +15,11 @@ def main():
  for b,l in CASES:
   log=out/f'matrix-{b}-{l}.log'
   try: p=subprocess.run([str(exe),f'--block-size={b}',f'--lead-blocks={l}',f'--model-path={model}'],text=True,capture_output=True,timeout=30,cwd=Path(__file__).resolve().parents[1])
-  except subprocess.TimeoutExpired as e: log.write_text((e.stdout or '')+(e.stderr or '')+'\ntimeout\n'); rows.append({'block_size':b,'lead_blocks':l,'exit_code':124,'status':'timeout','log':str(log),'log_sha256':sha(log)}); continue
+  except subprocess.TimeoutExpired as e:
+   so=e.stdout or ''; se=e.stderr or ''
+   if isinstance(so,bytes): so=so.decode(errors='replace')
+   if isinstance(se,bytes): se=se.decode(errors='replace')
+   log.write_text(so+se+'\ntimeout\n'); rows.append({'block_size':b,'lead_blocks':l,'exit_code':124,'status':'timeout','log':str(log),'log_sha256':sha(log)}); continue
   log.write_text(p.stdout+p.stderr)
   status=next((x for x in reversed((p.stdout+p.stderr).splitlines()) if x.startswith('diagnostic_status=')),'missing')
   unavailable |= status=='diagnostic_status=provider_unavailable'
