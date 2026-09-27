@@ -191,6 +191,21 @@ if(TARGET pulp::render AND TARGET pulp::gpu-audio)
     add_compile_definitions(GPU_NAM_VERSION_STRING="${GPU_NAM_VERSION}")
 
     set(_gpu_nam_experimental_sources)
+    if(GPU_NAM_EXPERIMENTAL_STAMPED_WAVENET)
+        add_executable(gpu-nam-stamped-validation
+            gpu_nam_stamped_node.cpp test_gpu_nam_stamped_node.cpp)
+        target_link_libraries(gpu-nam-stamped-validation PRIVATE pulp::gpu-audio)
+        target_compile_definitions(gpu-nam-stamped-validation PRIVATE
+            GPU_NAM_MODEL_PATH="${CMAKE_CURRENT_SOURCE_DIR}/models/example.nam")
+        if(GPU_NAM_BUILD_TESTS)
+            foreach(_lead 1 2 4 8)
+                add_test(NAME gpu-nam-stamped-lead-${_lead}
+                    COMMAND gpu-nam-stamped-validation ${_lead})
+                set_tests_properties(gpu-nam-stamped-lead-${_lead} PROPERTIES
+                    TIMEOUT 60 RESOURCE_LOCK pulp_gpu)
+            endforeach()
+        endif()
+    endif()
     if(GPU_NAM_EXPERIMENTAL_SHARED_WAVENET_SESSION)
         add_executable(gpu-nam-cpu-baseline gpu_nam_cpu_baseline.cpp)
         target_link_libraries(gpu-nam-cpu-baseline PRIVATE pulp::runtime)

@@ -46,6 +46,8 @@ option(GPU_NAM_BUILD_GPU_AUDIO_CAPABILITY_PROBE
 # intentionally stays on the released legacy API.
 option(GPU_NAM_EXPERIMENTAL_SHARED_WAVENET_SESSION
     "Build the provisional shared-memory WaveNet session adapter (default OFF)" OFF)
+option(GPU_NAM_EXPERIMENTAL_STAMPED_WAVENET
+    "Build SDK-owned stamped WaveNet consumer validation (requires new SDK)" OFF)
 if(GPU_NAM_EXPERIMENTAL_SHARED_WAVENET_SESSION)
     add_compile_definitions(GPU_NAM_EXPERIMENTAL_SHARED_WAVENET_SESSION=1)
 endif()
