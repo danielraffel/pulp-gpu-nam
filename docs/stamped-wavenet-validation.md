@@ -90,3 +90,64 @@ hashes, and all twelve 32/64/128 x 1/2/4/8 results. The consumer still uses its
 10 ms functional pacing and end-of-run fallback control. These switches do not
 turn that test into a performance measurement. Installed-SDK runtime comparison
 and actual scheduling effects remain pending.
+
+## Paced CPU and stamped comparison
+
+`--paced` replaces the functional 10 ms pumping loop with an absolute 48 kHz
+callback schedule and a separate non-realtime transport worker. It defaults to
+10 seconds of input, then drains the declared lead with zero input. Run each
+engine in a separate process on the same quiet machine and installed SDK:
+
+```sh
+gpu-nam-stamped-validation 4 64 /absolute/model.nam --paced \
+  --cpu-baseline --duration-seconds=10 --sidecar=/new/cpu.csv
+gpu-nam-stamped-validation 4 64 /absolute/model.nam --paced \
+  --duration-seconds=10 --sidecar=/new/gpu.csv \
+  --completion-policy=timed-wait-any --worker-wait-ns=100000
+```
+
+Both runs use the same stereo stimulus, block-aligned model warmup, callback
+count and fixed delayed output contract. The CPU baseline evaluates one model
+per channel and delays its output. The stamped callback evaluates the same full
+CPU shadow and may select GPU output instead. It cannot claim CPU DSP savings
+merely because GPU results were selected. Repeat with reversed run order before
+attributing small differences to a backend; record host load, thermal/power state
+and graphics activity beside the receipts. Do not run on an occupied CI host.
+
+The worker uses `wake_on_write=true`; the report records its computed polling
+interval. The transport still waits after every pump and the node services
+completion before admitting its next input. This is not fully event-driven
+completion servicing. TimedWaitAny alone does not eliminate that inter-pump gap.
+
+The CSV keeps every callback's scheduled/start/end/deadline timestamps and
+selected output (`priming`, `cpu_baseline`, `gpu_delivered`, or `cpu_fallback`).
+A callback deadline is the next block boundary. Start lateness and callback
+execution cost remain separate. GPU selection and fallback counters describe
+callback output, not inner completion counts. The transport's produced, missed,
+dropped and resynchronized counts are reported separately.
+
+Stimulus generation, allocation, model/provider preparation, independent delayed
+sample validation and CSV serialization are outside the measured loop. Process
+CPU time covers the entire loop, including the GPU worker, wakeups and capture
+bookkeeping. Drain CPU time is reported separately. The raw captures and rows
+are preallocated; no file I/O or reference-model evaluation occurs in a measured
+callback. The independent oracle runs after worker retirement. An injected
+`--inject-output-error` must fail even when all ordinary callbacks would have
+fallen back correctly.
+
+Only callback timestamps are available from this installed public consumer API.
+The existing private SDK phase trace observers are not re-declared here. The
+report explicitly marks GPU and internal admission/submit/retirement timestamps
+unavailable; callback time is not GPU execution time. A correct fallback-only
+run is valid audio but `gpu_delivery_observed=0` is not evidence of useful GPU
+participation. Deadline misses and zero GPU delivery remain data, not errors to
+hide by changing the schedule.
+
+The existing matrix runner accepts `--stamped --paced`, plus `--cpu-baseline`
+for the matched baseline. It hashes the CSV and checks complete sequential rows
+as well as the log. Use `--blocks=N` instead of duration for fixed-count runs,
+up to one million input blocks. Input and output capture storage is capped at
+1 GiB before allocation; the million-block 32-frame case is supported but larger
+captures may be rejected. Long runs remain a separate experiment. Initial work
+has only syntax/parser/matrix validation; installed runtime and performance
+conclusions are still pending.

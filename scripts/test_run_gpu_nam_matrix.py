@@ -50,4 +50,22 @@ class T(unittest.TestCase):
     d,p=self.fake('exit 99\n')
     r=subprocess.run([str(RUN),str(p),str(d/'o'),*options],capture_output=True,text=True)
     self.assertEqual(r.returncode,2); self.assertFalse((d/'o').exists())
+ def test_paced_sidecar_required(self):
+  d,p=self.fake('echo diagnostic_status=passed\n')
+  r=subprocess.run([str(RUN),str(p),str(d/'o'),'--stamped','--paced','--blocks=2'],capture_output=True,text=True)
+  self.assertNotEqual(r.returncode,0); rec=json.loads((d/'o/receipt.json').read_text()); self.assertEqual(rec['cases'][0]['status'],'missing_sidecar')
+ def test_paced_flags_and_sidecar_bound(self):
+  d,p=self.fake('for a in "$@"; do case "$a" in --sidecar=*) f=${a#--sidecar=};; esac; done\necho block,scheduled_ns,start_ns,end_ns,deadline_ns,selected > "$f"\ni=0; n=$((3+$1)); while [ $i -lt $n ]; do echo "$i,$i,$i,$i,$((i+1)),cpu_baseline" >> "$f"; i=$((i+1)); done\necho diagnostic_status=passed\n')
+  r=subprocess.run([str(RUN),str(p),str(d/'o'),'--stamped','--paced','--cpu-baseline','--blocks=3'],capture_output=True,text=True)
+  self.assertEqual(r.returncode,0,r.stderr); rec=json.loads((d/'o/receipt.json').read_text()); self.assertTrue(rec['paced']); self.assertTrue(rec['cpu_baseline']); self.assertEqual(rec['input_blocks'],3); self.assertEqual(len(rec['cases'][0]['sidecar_sha256']),64)
+ def test_invalid_paced_flags(self):
+  for opts in (['--paced'],['--stamped','--cpu-baseline'],['--stamped','--paced','--blocks=0'],['--stamped','--paced','--blocks=1000001'],['--stamped','--paced','--blocks=3','--duration-seconds=2']):
+   d,p=self.fake('exit 99\n');r=subprocess.run([str(RUN),str(p),str(d/'o'),*opts],capture_output=True,text=True)
+   self.assertEqual(r.returncode,2); self.assertFalse((d/'o').exists())
+ def test_incomplete_or_out_of_order_sidecar_rejected(self):
+  spec=importlib.util.spec_from_file_location('runner_sidecar',HERE/'run_gpu_nam_matrix.py'); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+  d=Path(tempfile.mkdtemp()); p=d/'rows.csv'; header='block,scheduled_ns,start_ns,end_ns,deadline_ns,selected\n'
+  p.write_text(header+'0,10,11,12,20,cpu_fallback\n1,20,21,22,30,gpu_delivered\n')
+  self.assertTrue(m.complete_sidecar(p,2)); self.assertFalse(m.complete_sidecar(p,3))
+  p.write_text(header+'0,10,11,12,20,cpu_fallback\n0,20,21,22,30,gpu_delivered\n'); self.assertFalse(m.complete_sidecar(p,2))
 if __name__=='__main__': unittest.main()

@@ -194,7 +194,7 @@ if(TARGET pulp::render AND TARGET pulp::gpu-audio)
     if(GPU_NAM_EXPERIMENTAL_STAMPED_WAVENET)
         list(APPEND _gpu_nam_experimental_sources gpu_nam_stamped_node.cpp)
         add_executable(gpu-nam-stamped-validation
-            gpu_nam_stamped_node.cpp test_gpu_nam_stamped_node.cpp)
+            gpu_nam_stamped_node.cpp gpu_nam_stamped_paced.cpp test_gpu_nam_stamped_node.cpp)
         target_link_libraries(gpu-nam-stamped-validation PRIVATE pulp::gpu-audio)
         target_compile_definitions(gpu-nam-stamped-validation PRIVATE
             GPU_NAM_MODEL_PATH="${CMAKE_CURRENT_SOURCE_DIR}/models/example.nam")
@@ -202,6 +202,9 @@ if(TARGET pulp::render AND TARGET pulp::gpu-audio)
             add_executable(gpu-nam-completion-options-test test_gpu_nam_completion_options.cpp)
             target_link_libraries(gpu-nam-completion-options-test PRIVATE pulp::gpu-audio)
             add_test(NAME gpu-nam-completion-options COMMAND gpu-nam-completion-options-test)
+            add_executable(gpu-nam-paced-options-test test_gpu_nam_paced_options.cpp)
+            target_compile_features(gpu-nam-paced-options-test PRIVATE cxx_std_20)
+            add_test(NAME gpu-nam-paced-options COMMAND gpu-nam-paced-options-test)
             foreach(_lead 1 2 4 8)
                 foreach(_frames 32 64 128 512)
                     add_test(NAME gpu-nam-stamped-${_frames}-lead-${_lead}

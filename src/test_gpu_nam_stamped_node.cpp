@@ -1,4 +1,5 @@
 #include "gpu_nam_stamped_node.hpp"
+#include "gpu_nam_stamped_paced.hpp"
 #include <pulp/gpu_audio/gpu_audio_transport.hpp>
 #include <algorithm>
 #include <array>
@@ -12,12 +13,13 @@
 int main(int argc, char** argv) {
     pulp::examples::GpuNamCompletionOptions completion;
     bool inject_output_error = false;
+    pulp::examples::GpuNamPacedOptions paced;
     std::vector<std::string_view> positional;
     for (int i = 1; i < argc; ++i) {
         const std::string_view arg = argv[i];
         if (arg == "--inject-output-error") inject_output_error = true;
         else if (arg.starts_with("--")) {
-            if (!pulp::examples::parse_completion_option(arg, completion)) return 64;
+            if (!paced.parse(arg) && !pulp::examples::parse_completion_option(arg, completion)) return 64;
         } else positional.push_back(arg);
     }
     if (!completion.valid() || positional.size() > 3) {
@@ -39,11 +41,16 @@ int main(int argc, char** argv) {
         if (result.ec != std::errc{} || result.ptr != arg.data() + arg.size() ||
             (frames != 32 && frames != 64 && frames != 128 && frames != 512)) return 64;
     }
+    if (!paced.valid(frames, lead) || (paced.cpu_only &&
+        (completion.policy != pulp::gpu_audio::GpuWaveNetCompletionPolicy::ProcessEvents ||
+         completion.worker_wait_ns != 0))) return 64;
+    paced.inject_error = inject_output_error;
     using namespace pulp;
     constexpr unsigned channels = 2, blocks = 48;
     examples::nam::NamModel model;
     std::string error;
     if (!examples::nam::load_nam(positional.size() == 3 ? std::string(positional[2]) : GPU_NAM_MODEL_PATH, model, &error)) return 1;
+    if (paced.enabled) return examples::run_stamped_paced(model, frames, lead, completion, paced);
     if (examples::GpuNamStampedNode::create(model, 3, frames, 48000, lead) ||
         examples::GpuNamStampedNode::create(model, channels, frames, 48000, 0)) return 2;
     auto node = examples::GpuNamStampedNode::create(model, channels, frames, 48000, lead, completion);
