@@ -469,6 +469,22 @@ if(GPU_NAM_SILENT_DEVICE_PROBE)
     add_dependencies(gpu-nam-silent-device-probe GpuNam_CLAP)
     target_include_directories(gpu-nam-silent-device-probe PRIVATE
         "${PULP_CLAP_INCLUDE_DIR}")
+    if(GPU_NAM_NORMAL_PHYSICAL_LIFECYCLE)
+        if(NOT GPU_NAM_EXPECTED_PULP_SOURCE_SHA STREQUAL "7858d7edb5a2bbb568c03d7e740043e8c897c0ee")
+            message(FATAL_ERROR "Normal physical lifecycle requires the exact reviewed admission-safe SDK7858")
+        endif()
+        execute_process(COMMAND git rev-parse HEAD WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+            OUTPUT_VARIABLE _physical_source_sha OUTPUT_STRIP_TRAILING_WHITESPACE RESULT_VARIABLE _physical_git_result)
+        execute_process(COMMAND git status --porcelain WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+            OUTPUT_VARIABLE _physical_source_dirty OUTPUT_STRIP_TRAILING_WHITESPACE RESULT_VARIABLE _physical_status_result)
+        if(NOT _physical_git_result EQUAL 0 OR NOT _physical_status_result EQUAL 0 OR NOT _physical_source_dirty STREQUAL "")
+            message(FATAL_ERROR "Physical lifecycle requires checked source provenance")
+        endif()
+        target_compile_definitions(gpu-nam-silent-device-probe PRIVATE
+            GPU_NAM_NORMAL_PHYSICAL_LIFECYCLE=1
+            GPU_NAM_PHYSICAL_SOURCE_SHA="${_physical_source_sha}"
+            GPU_NAM_PHYSICAL_SDK_SHA="${PULP_SDK_SOURCE_GIT_SHA}")
+    endif()
     # Intentionally no add_test: opening a physical device is always manual.
 endif()
 
@@ -476,4 +492,12 @@ if(GPU_NAM_BUILD_TESTS)
     add_executable(gpu-nam-delivery-status-test test_gpu_nam_delivery_status.cpp)
     target_compile_features(gpu-nam-delivery-status-test PRIVATE cxx_std_20)
     add_test(NAME gpu-nam-delivery-status COMMAND gpu-nam-delivery-status-test)
+endif()
+
+if(GPU_NAM_BUILD_TESTS)
+    add_executable(gpu-nam-physical-lifecycle-test test_gpu_nam_physical_lifecycle.cpp)
+    add_test(NAME gpu-nam-physical-lifecycle-contract COMMAND gpu-nam-physical-lifecycle-test)
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    add_test(NAME gpu-nam-physical-watchdog-contract
+        COMMAND ${Python3_EXECUTABLE} -B ${PROJECT_SOURCE_DIR}/scripts/test_physical_lifecycle_watchdog.py)
 endif()
