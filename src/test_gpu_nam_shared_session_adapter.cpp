@@ -53,6 +53,13 @@ TEST_CASE("experimental shared WaveNet adapter prepares the real example model",
     pulp::audio::BufferView<const float> input_view(input_channels, 1, 32);
     pulp::audio::BufferView<float> output_view(output_channels, 1, 32);
     node.process_block(input_view, output_view, 32);
+    CHECK(node.gpu_delivered_blocks() == 1);
+
+    // A second block covers consecutive public-session dispositions rather
+    // than a one-shot preparation path. CPU fallback cannot increment this.
+    std::fill(input.begin(), input.end(), 0.0f);
+    node.process_block(input_view, output_view, 32);
+    CHECK(node.gpu_delivered_blocks() == 2);
 
     for (float sample : output)
         CHECK(std::isfinite(sample));

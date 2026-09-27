@@ -89,6 +89,7 @@ bool GpuNamSharedSessionNode::prepare() {
     }
     prepared_ = true;
     sequence_ = 0;
+    gpu_delivered_blocks_ = 0;
     return true;
 }
 
@@ -115,6 +116,8 @@ bool GpuNamSharedSessionNode::submit_and_collect(
         if (auto result = session.receive(output)) {
             if (result->sequence != sequence)
                 continue;
+            if (result->status == gpu_audio::GpuWaveNetBlockStatus::GpuDelivered)
+                ++gpu_delivered_blocks_;
             return result->status == gpu_audio::GpuWaveNetBlockStatus::GpuDelivered;
         }
         std::this_thread::yield();
