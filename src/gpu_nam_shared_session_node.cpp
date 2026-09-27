@@ -112,7 +112,7 @@ void GpuNamSharedSessionNode::prime_fallback(
         // A missing input channel is a zero signal, but it still advances the
         // stateful WaveNet history.  Skipping process() here would make the
         // next real block resume from an old timeline.
-        const float* source = channel < input.num_channels()
+        const float* source = channel < input.num_channels() && input.num_samples() >= n
                                   ? input.channel_ptr(channel)
                                   : fallback_zero_input_.data();
         realtime_cpu_[channel].process(source, slot.data(), n);

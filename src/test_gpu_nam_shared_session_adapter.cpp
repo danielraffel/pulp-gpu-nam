@@ -129,6 +129,24 @@ TEST_CASE("experimental shared WaveNet fallback stays history aligned across hit
     node.process_cpu_fallback(input_view, output_view, 32);
     for (float sample : output)
         CHECK(sample == 0.0f);
+
+    // A malformed short input view is treated as a zero block rather than
+    // allowing prime_fallback() to read past the host allocation.
+    std::vector<float> short_input(8, 0.5f);
+    const float* short_channels[] = {short_input.data()};
+    pulp::audio::BufferView<const float> short_view(short_channels, 1, 8);
+    node.prime_fallback(short_view, 32);
+    node.process_cpu_fallback(short_view, output_view, 32);
+    for (float sample : output)
+        CHECK(std::isfinite(sample));
+
+    // An undersized output is cleared and rejected without copying n samples.
+    std::vector<float> short_output(8, -1.0f);
+    float* short_output_channels[] = {short_output.data()};
+    pulp::audio::BufferView<float> short_output_view(short_output_channels, 1, 8);
+    node.process_cpu_fallback(input_view, short_output_view, 32);
+    for (float sample : short_output)
+        CHECK(sample == 0.0f);
 }
 
 TEST_CASE("experimental shared WaveNet fallback advances missing channels as silence",
