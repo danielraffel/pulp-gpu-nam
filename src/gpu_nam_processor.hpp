@@ -1246,6 +1246,9 @@ private:
         gpu_audio::GpuAudioTransport::Config cfg;
         cfg.ring_blocks = 8;
         cfg.run_worker_thread = true;
+        // Stamped submission should wake promptly when the callback publishes
+        // input, matching the validated worker policy. Preparation-bound only.
+        cfg.wake_on_write = nam::kGpuNamEngineRoute == nam::GpuNamEngineRoute::Stamped;
         if (!stack->transport->prepare(stack->node.get(), cfg)) return nullptr;
 #if GPU_NAM_HAS_GPU_AUDIO_CAPABILITY_REPORT
         // Query only after prepare(), on this non-real-time stack-building

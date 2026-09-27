@@ -3,7 +3,8 @@
 // activates (with a device), produces blocks, populates gpu_status, and reproduces
 // the CPU engine within tolerance; the Engine switch is live and stays finite at a
 // fixed latency; and load_model() rebuilds the engines without NaNs. GPU cases
-// skip cleanly with no device (Metal is present in the dev environment, so they run).
+// permit absent devices on the legacy compatibility lane; explicit stamped
+// validation requires a functioning GPU provider.
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -411,6 +412,11 @@ TEST_CASE("GPU NAM GPU engine reproduces the CPU engine", "[nam][gpu]") {
     GpuNamProcessor proc;
     pulp::state::StateStore store;
     prepare_proc(proc, store, SR, BLOCK, /*engine=*/1.0f);
+#if defined(GPU_NAM_EXPERIMENTAL_STAMPED_WAVENET)
+    // Explicit stamped validation must not turn unavailable hardware/provider
+    // into a green GPU test.
+    REQUIRE(proc.gpu_engine_active());
+#endif
     if (!proc.gpu_engine_active()) {
         WARN("GPU engine unavailable — skipping GPU-vs-CPU test (CPU path still covered).");
         proc.release();
@@ -526,7 +532,11 @@ TEST_CASE("GPU NAM GPU engine keeps stereo channels independent on the shared de
 
     std::vector<float> cpuL, cpuR, gpuL, gpuR;
     drive(0.0f, cpuL, cpuR, 0);  // per-channel CPU reference (independent by construction)
-    if (!drive(1.0f, gpuL, gpuR, 12)) {
+    const bool gpu_ready = drive(1.0f, gpuL, gpuR, 12);
+#if defined(GPU_NAM_EXPERIMENTAL_STAMPED_WAVENET)
+    REQUIRE(gpu_ready);
+#endif
+    if (!gpu_ready) {
         WARN("GPU engine unavailable — skipping stereo-independence test (CPU path covered).");
         return;
     }
