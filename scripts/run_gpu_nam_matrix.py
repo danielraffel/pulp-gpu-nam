@@ -4,7 +4,14 @@ from pathlib import Path
 CASES=[(b,l) for b in (32,64,128) for l in (1,2,4,8)]
 def sha(p): return hashlib.sha256(Path(p).read_bytes()).hexdigest()
 def main():
- ap=argparse.ArgumentParser(); ap.add_argument('executable'); ap.add_argument('output'); ap.add_argument('--model',default=None); ap.add_argument('--transport-sha',default=None); a=ap.parse_args()
+ ap=argparse.ArgumentParser(); ap.add_argument('executable'); ap.add_argument('output'); ap.add_argument('--model',default=None); ap.add_argument('--transport-sha',default=None)
+ ap.add_argument('--stamped',action='store_true',help='run the stamped correctness consumer')
+ ap.add_argument('--completion-policy',choices=('process-events','wait-any','timed-wait-any'),default=None)
+ ap.add_argument('--worker-wait-ns',type=int,default=0)
+ a=ap.parse_args()
+ if (a.completion_policy is not None or a.worker_wait_ns != 0) and not a.stamped: ap.error('completion options require --stamped')
+ policy=a.completion_policy or 'process-events'
+ if not 0 <= a.worker_wait_ns <= 1000000 or (a.worker_wait_ns and policy != 'timed-wait-any'): ap.error('positive worker wait requires timed-wait-any; valid range is 0..1000000ns')
  exe=Path(a.executable).resolve(); out=Path(a.output).resolve()
  if not exe.is_absolute() or not exe.is_file() or not os.access(exe,os.X_OK): return 2
  if out.exists() and any(out.iterdir()): print('output must be empty or absent',file=sys.stderr); return 2
@@ -14,7 +21,8 @@ def main():
  before=sha(exe); rows=[]; unavailable=False
  for b,l in CASES:
   log=out/f'matrix-{b}-{l}.log'
-  try: p=subprocess.run([str(exe),f'--block-size={b}',f'--lead-blocks={l}',f'--model-path={model}'],text=True,capture_output=True,timeout=30,cwd=Path(__file__).resolve().parents[1])
+  command=([str(exe),str(l),str(b),str(model),f'--completion-policy={policy}',f'--worker-wait-ns={a.worker_wait_ns}'] if a.stamped else [str(exe),f'--block-size={b}',f'--lead-blocks={l}',f'--model-path={model}'])
+  try: p=subprocess.run(command,text=True,capture_output=True,timeout=30,cwd=Path(__file__).resolve().parents[1])
   except subprocess.TimeoutExpired as e:
    so=e.stdout or ''; se=e.stderr or ''
    if isinstance(so,bytes): so=so.decode(errors='replace')
@@ -25,7 +33,7 @@ def main():
   unavailable |= status=='diagnostic_status=provider_unavailable'
   rows.append({'block_size':b,'lead_blocks':l,'exit_code':p.returncode,'status':status,'log':str(log),'log_sha256':sha(log)})
  after=sha(exe); failed=any(r['exit_code']!=0 or r['status']!='diagnostic_status=passed' for r in rows)
- rec={'executable':str(exe),'executable_sha256_before':before,'executable_sha256_after':after,'source_commit':subprocess.check_output(['git','rev-parse','HEAD'],cwd=Path(__file__).resolve().parents[1],text=True).strip(),'model':str(model),'model_sha256':sha(model),'transport_overlay_object_sha256':a.transport_sha,'cases':rows,'case_count':len(rows),'cpu_process_time_baseline':'open'}
+ rec={'executable':str(exe),'executable_sha256_before':before,'executable_sha256_after':after,'source_commit':subprocess.check_output(['git','rev-parse','HEAD'],cwd=Path(__file__).resolve().parents[1],text=True).strip(),'model':str(model),'model_sha256':sha(model),'transport_overlay_object_sha256':a.transport_sha,'cases':rows,'case_count':len(rows),'cpu_process_time_baseline':'open','consumer':'stamped' if a.stamped else 'legacy-diagnostic','completion_policy':policy if a.stamped else None,'worker_wait_ns':a.worker_wait_ns if a.stamped else None}
  (out/'receipt.json').write_text(json.dumps(rec,indent=2)+'\n')
  if before!=after or failed: return 3 if before!=after else (4 if unavailable else 1)
  return 0

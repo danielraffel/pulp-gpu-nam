@@ -38,4 +38,16 @@ class T(unittest.TestCase):
   finally: os.environ.pop('FAKE_ARGS',None)
   self.assertEqual(r.returncode,0); text=args.read_text(); self.assertIn('--model-path='+str(MODEL.resolve()),text)
   rec=json.loads((d/'o/receipt.json').read_text()); self.assertEqual(rec['source_commit'],subprocess.check_output(['git','rev-parse','HEAD'],cwd=HERE.parent,text=True).strip()); self.assertEqual(rec['model_sha256'],__import__('hashlib').sha256(MODEL.read_bytes()).hexdigest())
+ def test_stamped_options_forwarded(self):
+  d,p=self.fake('echo "$@" >> "$FAKE_ARGS"\necho diagnostic_status=passed\n'); args=d/'args'; env=dict(os.environ,FAKE_ARGS=str(args))
+  r=subprocess.run([str(RUN),str(p),str(d/'o'),'--model',str(MODEL),'--stamped','--completion-policy=timed-wait-any','--worker-wait-ns=100000'],env=env,capture_output=True,text=True)
+  self.assertEqual(r.returncode,0,r.stderr); lines=args.read_text().splitlines(); self.assertEqual(len(lines),12)
+  self.assertIn('1 32 '+str(MODEL.resolve()),lines[0]); self.assertIn('--completion-policy=timed-wait-any --worker-wait-ns=100000',lines[0])
+  rec=json.loads((d/'o/receipt.json').read_text()); self.assertEqual(rec['completion_policy'],'timed-wait-any'); self.assertEqual(rec['worker_wait_ns'],100000)
+ def test_completion_options_rejected_before_execution(self):
+  for options in (['--completion-policy=wait-any'],['--stamped','--worker-wait-ns=1'],['--stamped','--completion-policy=wait-any','--worker-wait-ns=1'],['--stamped','--completion-policy=timed-wait-any','--worker-wait-ns=1000001'],['--stamped','--worker-wait-ns=-1'],['--stamped','--completion-policy=invalid']):
+   with self.subTest(options=options):
+    d,p=self.fake('exit 99\n')
+    r=subprocess.run([str(RUN),str(p),str(d/'o'),*options],capture_output=True,text=True)
+    self.assertEqual(r.returncode,2); self.assertFalse((d/'o').exists())
 if __name__=='__main__': unittest.main()

@@ -10,20 +10,31 @@
 #include <thread>
 
 int main(int argc, char** argv) {
-    const bool inject_output_error = argc > 1 &&
-        std::string(argv[argc - 1]) == "--inject-output-error";
-    if (inject_output_error) --argc;
+    pulp::examples::GpuNamCompletionOptions completion;
+    bool inject_output_error = false;
+    std::vector<std::string_view> positional;
+    for (int i = 1; i < argc; ++i) {
+        const std::string_view arg = argv[i];
+        if (arg == "--inject-output-error") inject_output_error = true;
+        else if (arg.starts_with("--")) {
+            if (!pulp::examples::parse_completion_option(arg, completion)) return 64;
+        } else positional.push_back(arg);
+    }
+    if (!completion.valid() || positional.size() > 3) {
+        std::cerr << "invalid completion configuration: worker wait must be 0..1000000ns; "
+                     "positive wait requires timed-wait-any\n";
+        return 64;
+    }
     unsigned lead = 2;
     unsigned frames = 32;
-    if (argc > 4) return 64;
-    if (argc >= 2) {
-        const std::string arg = argv[1];
+    if (!positional.empty()) {
+        const auto arg = positional[0];
         const auto result = std::from_chars(arg.data(), arg.data() + arg.size(), lead);
         if (result.ec != std::errc{} || result.ptr != arg.data() + arg.size() ||
             (lead != 1 && lead != 2 && lead != 4 && lead != 8)) return 64;
     }
-    if (argc >= 3) {
-        const std::string arg = argv[2];
+    if (positional.size() >= 2) {
+        const auto arg = positional[1];
         const auto result = std::from_chars(arg.data(), arg.data() + arg.size(), frames);
         if (result.ec != std::errc{} || result.ptr != arg.data() + arg.size() ||
             (frames != 32 && frames != 64 && frames != 128 && frames != 512)) return 64;
@@ -32,10 +43,10 @@ int main(int argc, char** argv) {
     constexpr unsigned channels = 2, blocks = 48;
     examples::nam::NamModel model;
     std::string error;
-    if (!examples::nam::load_nam(argc == 4 ? argv[3] : GPU_NAM_MODEL_PATH, model, &error)) return 1;
+    if (!examples::nam::load_nam(positional.size() == 3 ? std::string(positional[2]) : GPU_NAM_MODEL_PATH, model, &error)) return 1;
     if (examples::GpuNamStampedNode::create(model, 3, frames, 48000, lead) ||
         examples::GpuNamStampedNode::create(model, channels, frames, 48000, 0)) return 2;
-    auto node = examples::GpuNamStampedNode::create(model, channels, frames, 48000, lead);
+    auto node = examples::GpuNamStampedNode::create(model, channels, frames, 48000, lead, completion);
     if (!node) return 3;
     if (!node->prepare()) {
         std::cout << "shared_prepare_failed=1 cause=unclassified\n";
@@ -91,10 +102,14 @@ int main(int argc, char** argv) {
     const auto calls = node->cpu_model_calls();
     const auto misses = node->fallback_reads();
     if (!node->release()) return 6;
+    std::cout << "completion_policy=" << examples::completion_policy_name(completion.policy)
+              << " worker_wait_ns=" << completion.worker_wait_ns << "\n";
     std::cout << "frames=" << frames << " lead=" << lead << " max_error=" << max_error
               << " cpu_model_calls=" << calls << " fallback_reads=" << misses
               << " gpu_callbacks=" << gpu_callbacks
               << " worker_produced=" << stats.produced_blocks << '\n';
-    return max_error <= 1e-4 && calls == (blocks + lead) * channels &&
-           misses > 0 && gpu_callbacks > 0 ? 0 : 7;
+    const bool passed = max_error <= 1e-4 && calls == (blocks + lead) * channels &&
+                        misses > 0 && gpu_callbacks > 0;
+    std::cout << "diagnostic_status=" << (passed ? "passed" : "failed") << '\n';
+    return passed ? 0 : 7;
 }

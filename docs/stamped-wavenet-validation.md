@@ -61,3 +61,32 @@ including listener-silent state restoration. It also compares stopped reprepare
 against a fresh instance, verifies non-automatable metadata and pending UI text,
 and keeps PDC constant. These source-linked checks do not prove installed-SDK or
 DAW behavior by themselves.
+
+## Completion service experiments
+
+The stamped factory accepts optional `GpuNamCompletionOptions`. Defaults remain
+ProcessEvents and a zero worker wait budget. The standalone consumer accepts:
+
+```sh
+gpu-nam-stamped-validation 2 64 /absolute/model.nam \
+  --completion-policy=timed-wait-any --worker-wait-ns=100000
+scripts/run_gpu_nam_matrix.sh /absolute/gpu-nam-stamped-validation /new/results \
+  --model /absolute/model.nam --stamped \
+  --completion-policy=timed-wait-any --worker-wait-ns=100000
+```
+
+Policies are `process-events`, `wait-any`, and `timed-wait-any`. Zero preserves
+nonblocking worker servicing for every policy. A positive relative budget is
+accepted only for TimedWaitAny and must not exceed 1,000,000 ns. ProcessEvents
+and ordinary WaitAny do not honor a positive timeout, so such combinations fail
+explicitly. The SDK recomputes the deadline for each worker pump and shares that
+budget across channels; it is neither an absolute audio deadline nor a callback
+wait. The timed provider wait is capped to the same requested budget. Unsupported
+provider preparation remains a failed experiment, never a fallback pass.
+
+Use separate output directories for matched policies with identical model,
+frames and lead. Receipts record the requested policy/budget, model and binary
+hashes, and all twelve 32/64/128 x 1/2/4/8 results. The consumer still uses its
+10 ms functional pacing and end-of-run fallback control. These switches do not
+turn that test into a performance measurement. Installed-SDK runtime comparison
+and actual scheduling effects remain pending.

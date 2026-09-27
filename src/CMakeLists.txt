@@ -199,6 +199,9 @@ if(TARGET pulp::render AND TARGET pulp::gpu-audio)
         target_compile_definitions(gpu-nam-stamped-validation PRIVATE
             GPU_NAM_MODEL_PATH="${CMAKE_CURRENT_SOURCE_DIR}/models/example.nam")
         if(GPU_NAM_BUILD_TESTS)
+            add_executable(gpu-nam-completion-options-test test_gpu_nam_completion_options.cpp)
+            target_link_libraries(gpu-nam-completion-options-test PRIVATE pulp::gpu-audio)
+            add_test(NAME gpu-nam-completion-options COMMAND gpu-nam-completion-options-test)
             foreach(_lead 1 2 4 8)
                 foreach(_frames 32 64 128 512)
                     add_test(NAME gpu-nam-stamped-${_frames}-lead-${_lead}

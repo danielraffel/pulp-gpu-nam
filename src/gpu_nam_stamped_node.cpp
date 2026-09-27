@@ -5,7 +5,9 @@
 namespace pulp::examples {
 std::unique_ptr<GpuNamStampedNode> GpuNamStampedNode::create(
     const nam::NamModel& model, std::uint32_t channels,
-    std::uint32_t frames, std::uint32_t sample_rate, std::uint32_t lead) {
+    std::uint32_t frames, std::uint32_t sample_rate, std::uint32_t lead,
+    GpuNamCompletionOptions completion) {
+    if (!completion.valid()) return {};
     if (!channels || channels > 2 || !frames || !sample_rate || !lead || lead > 8 ||
         model.arrays().empty()) return {};
     const auto prewarm = model.prewarm_block_count(frames);
@@ -36,6 +38,11 @@ std::unique_ptr<GpuNamStampedNode> GpuNamStampedNode::create(
         .head_scale = model.head_scale(), .layers = layers,
         .weight_count = model.weights_size()};
     config.session.weights = {model.weights_data(), model.weights_size()};
+    config.session.completion_policy = completion.policy;
+    // The relative worker budget is shared across channels for each pump.
+    // A zero worker budget never calls the waiting service path.
+    config.completion_service_wait_ns = completion.worker_wait_ns;
+    config.session.completion_wait_ns = completion.worker_wait_ns;
     config.channels = channels;
     config.lead_blocks = lead;
     config.capacity = 16;

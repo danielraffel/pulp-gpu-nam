@@ -1,6 +1,7 @@
 #pragma once
 
 #include "nam_model.hpp"
+#include "gpu_nam_completion_options.hpp"
 #include <pulp/gpu_audio/gpu_wavenet_realtime_node.hpp>
 #include <array>
 #include <memory>
@@ -15,7 +16,7 @@ public:
     static std::unique_ptr<GpuNamStampedNode> create(
         const nam::NamModel& model, std::uint32_t channels,
         std::uint32_t block_size, std::uint32_t sample_rate,
-        std::uint32_t lead_blocks);
+        std::uint32_t lead_blocks, GpuNamCompletionOptions completion = {});
 
     bool prepare() override;
     void prime_fallback(const audio::BufferView<const float>& input,
