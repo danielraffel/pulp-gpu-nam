@@ -1,5 +1,5 @@
 import pathlib,sys,tempfile,json
-from run_physical_lifecycle import run_child,child_result
+from run_physical_lifecycle import run_child,child_result,epoch_result,file_hash
 checks=0
 def check(v):
     global checks
@@ -21,4 +21,10 @@ with tempfile.TemporaryDirectory() as temporary:
     check(not child_result(78,False,receipt)[0]);check(not child_result(0,True,receipt)[0])
     for k in good:
         bad=dict(good);bad.pop(k);receipt.write_text(json.dumps(bad));check(not child_result(0,False,receipt)[0])
+    meta=root/'metadata.txt'
+    good_meta='engine=shared\ndevice_id=42\nepoch=0\ncallback_entries=8\ncallback_exits=8\n'
+    meta.write_text(good_meta);check(epoch_result(meta,'shared','42',0)[0])
+    for text in [good_meta.replace('callback_exits=8','callback_exits=7'),good_meta.replace('callback_entries=8','callback_entries=oops'),good_meta+'engine=cpu\n',good_meta.replace('device_id=42','device_id=43'),good_meta.replace('epoch=0','epoch=1'),'']:
+        meta.write_text(text);check(not epoch_result(meta,'shared','42',0)[0])
+    before=file_hash(meta);meta.write_text('changed');check(file_hash(meta)!=before)
 print(f'{checks} watchdog and receipt controls passed')

@@ -18,6 +18,7 @@ owned host window, use the external watchdog:
 python3 -B scripts/run_physical_lifecycle.py \
   --executable /absolute/path/gpu-nam-silent-device-probe \
   --clap /absolute/path/GpuNam.clap/Contents/MacOS/GpuNam \
+  --expected-product-sha EXACT_REVIEWED_PRODUCT_SHA \
   --sdk-provenance /absolute/sdk/prefix/sdk-provenance.json \
   --device-id ENUMERATED_ID --mode shared \
   --output-dir /absolute/new/physical-shared
@@ -43,7 +44,9 @@ normally. The shared `Loaded` helper and ordinary CLAP acceptance are unchanged.
 Each epoch preserves callback/audio CSVs and metadata including selected GPU,
 fallback and priming counts. The final child lifecycle receipt is written only
 after successful teardown. The parent binds it to mode/device, embedded source
-and SDK revisions, input binary hashes, both epoch records and process exit.
+and SDK revisions, input hashes before launch and unchanged hashes afterward, both epoch records
+and process exit. The expected product SHA is an explicit required argument.
+Malformed epoch metadata fails into the parent receipt.
 Source revisions identify the configured source; archive exact compile/link
 receipts separately when accepting an installed build.
 

@@ -21,29 +21,47 @@ def child_result(code,timed_out,receipt):
     passed=passed and child.get('physical_output')=='silence'
     return passed,child
 
+def file_hash(path):
+    digest=hashlib.sha256()
+    with path.open('rb') as stream:
+        for block in iter(lambda:stream.read(1024*1024),b''):digest.update(block)
+    return digest.hexdigest()
+
+def epoch_result(path,mode,device,epoch):
+    try:
+        pairs=[line.split('=',1) for line in path.read_text().splitlines() if '=' in line]
+        fields=dict(pairs)
+        if len(fields)!=len(pairs):return False,fields
+        entries=int(fields.get('callback_entries','0'));exits=int(fields.get('callback_exits','-1'))
+        valid=fields.get('engine')==mode and fields.get('device_id')==device and fields.get('epoch')==str(epoch)
+        return valid and entries==exits and entries>0,fields
+    except (OSError,ValueError,UnicodeError):return False,None
+
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--executable',required=True,type=pathlib.Path);p.add_argument('--clap',required=True,type=pathlib.Path)
-    p.add_argument('--sdk-provenance',required=True,type=pathlib.Path);p.add_argument('--device-id',required=True)
+    p.add_argument('--expected-product-sha',required=True);p.add_argument('--sdk-provenance',required=True,type=pathlib.Path);p.add_argument('--device-id',required=True)
     p.add_argument('--mode',required=True,choices=['cpu','shared']);p.add_argument('--output-dir',required=True,type=pathlib.Path)
     p.add_argument('--timeout',type=float,default=45)
     a=p.parse_args();assert 1<=a.timeout<=120
+    assert len(a.expected_product_sha)==40 and all(c in '0123456789abcdef' for c in a.expected_product_sha)
     provenance=json.loads(a.sdk_provenance.read_text());assert provenance['source_git_sha']==SDK
     for f in [a.executable,a.clap]:assert f.is_file()
     # Exclusive fresh directory prevents an old success receipt satisfying this run.
     a.output_dir.mkdir(parents=True,exist_ok=False)
+    before_hashes={str(f):file_hash(f) for f in [a.executable,a.clap,a.sdk_provenance]}
     prefix=a.output_dir/'capture';command=[str(a.executable.resolve()),str(a.clap.resolve()),a.device_id,a.mode,str(prefix.resolve()),'--normal-lifecycle']
     with (a.output_dir/'child.log').open('w') as log:code,timed_out=run_child(command,a.timeout,log)
     evidence={'schema':'gpu-nam.physical-lifecycle-parent.v1','command':command,'exit_code':code,'timeout':timed_out,
               'sdk_source':SDK,'mode':a.mode,'device_id':a.device_id,'passed':False,
-              'inputs':{str(f):hashlib.sha256(f.read_bytes()).hexdigest() for f in [a.executable,a.clap,a.sdk_provenance]}}
+              'inputs_before':before_hashes,'expected_product_sha':a.expected_product_sha}
     receipt=prefix.with_name(prefix.name+'-lifecycle.json')
     evidence['passed'],child=child_result(code,timed_out,receipt)
     if child is not None:
         evidence['child']=child
         evidence['passed']=evidence['passed'] and child.get('sdk_sha')==SDK and child.get('mode')==a.mode and child.get('device_id')==a.device_id
         source=child.get('source_sha','')
-        evidence['passed']=evidence['passed'] and len(source)==40 and all(c in '0123456789abcdef' for c in source)
+        evidence['passed']=evidence['passed'] and source==a.expected_product_sha
     stage=prefix.with_name(prefix.name+'-stage.txt')
     evidence['last_child_stage']=stage.read_text().strip() if stage.is_file() else 'unavailable'
 
@@ -51,12 +69,14 @@ def main():
         for suffix in ('callbacks.csv','audio.csv','metadata.txt'):
             if not (a.output_dir/f'capture-epoch{epoch}-{suffix}').is_file():evidence['passed']=False
         meta=a.output_dir/f'capture-epoch{epoch}-metadata.txt'
-        if meta.is_file():
-            fields=dict(line.split('=',1) for line in meta.read_text().splitlines() if '=' in line)
-            evidence.setdefault('epoch_metadata',[]).append(fields)
-            evidence['passed']=evidence['passed'] and fields.get('engine')==a.mode and fields.get('device_id')==a.device_id and fields.get('epoch')==str(epoch)
-            evidence['passed']=evidence['passed'] and fields.get('callback_entries')==fields.get('callback_exits') and int(fields.get('callback_entries','0'))>0
-    evidence['outputs']={f.name:hashlib.sha256(f.read_bytes()).hexdigest() for f in a.output_dir.iterdir() if f.is_file()}
+        valid,fields=epoch_result(meta,a.mode,a.device_id,epoch)
+        evidence.setdefault('epoch_metadata',[]).append(fields)
+        evidence['passed']=evidence['passed'] and valid
+    try:evidence['inputs_after']={str(f):file_hash(f) for f in [a.executable,a.clap,a.sdk_provenance]}
+    except OSError:evidence['inputs_after']={}
+    evidence['inputs_unchanged']=evidence['inputs_after']==before_hashes
+    evidence['passed']=evidence['passed'] and evidence['inputs_unchanged']
+    evidence['outputs']={f.name:file_hash(f) for f in a.output_dir.iterdir() if f.is_file()}
     (a.output_dir/'receipt.json').write_text(json.dumps(evidence,indent=2)+'\n')
     return 0 if evidence['passed'] else 1
 if __name__=='__main__':sys.exit(main())
