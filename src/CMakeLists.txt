@@ -338,6 +338,8 @@ if(TARGET pulp::render AND TARGET pulp::gpu-audio)
                 pulp::gpu-audio pulp::runtime Catch2::Catch2WithMain)
             target_include_directories(gpu-nam-shared-session-adapter-test PRIVATE
                 ${CMAKE_CURRENT_SOURCE_DIR})
+            target_compile_definitions(gpu-nam-shared-session-adapter-test PRIVATE
+                GPU_NAM_MODEL_PATH="${CMAKE_CURRENT_SOURCE_DIR}/models/example.nam")
             add_test(NAME gpu-nam-shared-session-adapter-test
                      COMMAND gpu-nam-shared-session-adapter-test)
         endif()
