@@ -8,10 +8,14 @@
 namespace pulp::examples {
 struct GpuNamPacedOptions {
     bool enabled = false, cpu_only = false, inject_error = false;
+    bool staged_gpu = false, force_fallback = false, inject_forward_failure = false;
     std::uint32_t seconds = 10, input_blocks = 0;
     bool seconds_explicit = false;
     std::string sidecar;
     bool parse(std::string_view arg) {
+        if (arg == "--staged-gpu") { staged_gpu = true; return true; }
+        if (arg == "--force-fallback") { force_fallback = true; return true; }
+        if (arg == "--inject-forward-failure") { inject_forward_failure = true; return true; }
         if (arg == "--paced") { enabled = true; return true; }
         if (arg == "--cpu-baseline") { cpu_only = true; return true; }
         if (arg.starts_with("--sidecar=")) { sidecar = arg.substr(10); return !sidecar.empty(); }
@@ -31,7 +35,9 @@ struct GpuNamPacedOptions {
         return input_blocks ? input_blocks : (std::uint64_t(seconds) * 48000 + frames - 1) / frames;
     }
     bool valid(std::uint32_t frames, std::uint32_t lead) const noexcept {
-        if (!enabled) return !cpu_only && sidecar.empty() && !seconds_explicit && input_blocks == 0;
+        if ((cpu_only && (staged_gpu || force_fallback || inject_forward_failure)) ||
+            (inject_forward_failure && (!staged_gpu || force_fallback))) return false;
+        if (!enabled) return !staged_gpu && !force_fallback && !inject_forward_failure && !cpu_only && sidecar.empty() && !seconds_explicit && input_blocks == 0;
         if (sidecar.empty() || (seconds_explicit && input_blocks) || frames == 0) return false;
         const auto count = blocks(frames);
         // Two stereo float captures (input and output), capped before allocation.

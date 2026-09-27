@@ -1,5 +1,6 @@
 #include "gpu_nam_stamped_paced.hpp"
 #include "gpu_nam_stamped_node.hpp"
+#include "gpu_nam_staged_diagnostic.hpp"
 #include <pulp/gpu_audio/gpu_audio_transport.hpp>
 #include <algorithm>
 #include <array>
@@ -47,13 +48,21 @@ int run_stamped_paced(const nam::NamModel& model, unsigned frames, unsigned lead
     std::array<nam::NamModel, channels> cpu{model, model};
     std::vector<float> delay(std::size_t(lead) * stride);
     std::unique_ptr<GpuNamStampedNode> node;
+    std::unique_ptr<GpuNamStagedDiagnostic> staged;
     gpu_audio::GpuAudioTransport transport;
     if (options.cpu_only) {
         for (auto& c : cpu) c.prewarm_block_aligned(frames);
+    } else if (options.staged_gpu) {
+        staged = std::make_unique<GpuNamStagedDiagnostic>(model, frames, lead, options.inject_forward_failure);
+        if (!staged->prepare() ||
+            !transport.prepare(staged.get(), {.ring_blocks=16, .run_worker_thread=!options.force_fallback, .wake_on_write=true})) {
+            std::cerr << "staged_prepare_failed=1\n"; return 8;
+        }
+        std::cout << "staged_backend=" << staged->backend() << " staged_device_count=1\n";
     } else {
         node = GpuNamStampedNode::create(model, channels, frames, 48000, lead, completion);
         if (!node || !node->prepare() ||
-            !transport.prepare(node.get(), {.ring_blocks=16, .run_worker_thread=true, .wake_on_write=true})) {
+            !transport.prepare(node.get(), {.ring_blocks=16, .run_worker_thread=!options.force_fallback, .wake_on_write=true})) {
             std::cerr << "shared_prepare_failed=1 cause=unclassified\n"; return 8;
         }
         const auto capability = transport.capability_report();
@@ -65,6 +74,7 @@ int run_stamped_paced(const nam::NamModel& model, unsigned frames, unsigned lead
     float* outs[channels]{};
     audio::BufferView<const float> in(ins, channels, frames);
     audio::BufferView<float> out(outs, channels, frames);
+    auto fallback_reads = [&]() { return node ? node->fallback_reads() : staged ? staged->fallback_reads() : 0; };
     const auto cpu_start = std::clock();
     if (cpu_start == std::clock_t(-1)) return 66;
     const auto origin = Clock::now();
@@ -79,7 +89,7 @@ int run_stamped_paced(const nam::NamModel& model, unsigned frames, unsigned lead
         row.scheduled = origin_ns + paced_offset_ns(b, frames);
         row.deadline = origin_ns + paced_offset_ns(b + 1, frames);
         std::this_thread::sleep_until(origin + std::chrono::nanoseconds(paced_offset_ns(b, frames)));
-        const auto fallback_before = node ? node->fallback_reads() : 0;
+        const auto fallback_before = fallback_reads();
         row.start = nanoseconds(Clock::now());
         if (options.cpu_only) {
             auto* slot = delay.data() + cursor * stride;
@@ -91,14 +101,15 @@ int run_stamped_paced(const nam::NamModel& model, unsigned frames, unsigned lead
         } else transport.process(in, out, frames);
         row.end = nanoseconds(Clock::now());
         row.selected = b < lead ? "priming" : options.cpu_only ? "cpu_baseline" :
-            node->fallback_reads() == fallback_before ? "gpu_delivered" : "cpu_fallback";
+            fallback_reads() == fallback_before ? "gpu_delivered" : "cpu_fallback";
     }
     const auto loop_end_ns = nanoseconds(Clock::now());
     const auto cpu_loop_end = std::clock();
     const auto stats = transport.stats();
     const bool fenced_before_release = node && node->fenced();
     transport.release();
-    const auto cpu_calls = node ? node->cpu_model_calls() : blocks * channels;
+    const auto cpu_calls = node ? node->cpu_model_calls() : staged ? staged->cpu_model_calls() : blocks * channels;
+    const auto failed_forwards = staged ? staged->failed_forwards() : 0;
     const bool drained = !node || node->release();
     const auto cpu_drain_end = std::clock();
     if (cpu_loop_end == std::clock_t(-1) || cpu_drain_end == std::clock_t(-1) ||
@@ -125,7 +136,10 @@ int run_stamped_paced(const nam::NamModel& model, unsigned frames, unsigned lead
     std::uint64_t gpu=0,fallback=0,late_starts=0,deadline_misses=0,callback_ns=0,max_callback=0;
     fprintf(sidecar,"block,delivered_input_sequence,scheduled_ns,start_ns,end_ns,deadline_ns,selected,callback_ns,start_lateness_ns,deadline_missed\n");
     for (std::uint64_t b=0;b<blocks;++b) {
-        const auto& row=rows[b]; const auto cost=row.end-row.start;
+        auto& row=rows[b]; const auto cost=row.end-row.start;
+        if (options.staged_gpu && std::string_view(row.selected)=="gpu_delivered" &&
+            !std::all_of(actual.begin()+b*stride, actual.begin()+(b+1)*stride, [](float v){return std::isfinite(v);}))
+            row.selected="gpu_forward_failed";
         const auto lateness=row.start>row.scheduled ? row.start-row.scheduled : 0;
         gpu += std::string_view(row.selected)=="gpu_delivered";
         fallback += std::string_view(row.selected)=="cpu_fallback";
@@ -139,14 +153,15 @@ int run_stamped_paced(const nam::NamModel& model, unsigned frames, unsigned lead
             (unsigned long long)cost,(unsigned long long)lateness,int(row.end>row.deadline));
     }
     const bool io_ok=fflush(sidecar)==0 && !ferror(sidecar);
-    const bool passed=drained && io_ok && mismatches==0 && cpu_calls==blocks*channels;
-    std::cout << "paced=1 engine=" << (options.cpu_only?"cpu":"stamped")
+    const bool passed=drained && io_ok && failed_forwards==0 && mismatches==0 && cpu_calls==blocks*channels;
+    std::cout << "paced=1 engine=" << (options.cpu_only?"cpu":options.staged_gpu?"staged":"stamped")
         << " scheduling=ordinary_os_thread hard_realtime=0 sample_rate=48000 channels=2 frames=" << frames << " lead=" << lead
         << " input_blocks=" << inputs_count << " drain_blocks=" << lead << " measured_blocks=" << blocks
-        << " completion_policy=" << completion_policy_name(completion.policy)
+        << " completion_policy=" << (options.staged_gpu ? "legacy_blocking_readback" : completion_policy_name(completion.policy))
         << " worker_wait_ns=" << completion.worker_wait_ns
-        << " wake_on_write=" << (!options.cpu_only)
+        << " wake_on_write=" << (!options.cpu_only && !options.force_fallback)
         << " worker_poll_interval_us=" << (options.cpu_only ? 0 : std::clamp(frames * 1'000'000u / 48000u / 4u, 50u, 2000u))
+        << " forced_fallback=" << options.force_fallback << " failed_gpu_forwards=" << failed_forwards
         << " cpu_model_calls=" << cpu_calls << " gpu_callbacks=" << gpu << " fallback_callbacks=" << fallback
         << " worker_produced=" << stats.produced_blocks << " transport_misses=" << stats.miss_blocks
         << " fenced_before_release=" << fenced_before_release

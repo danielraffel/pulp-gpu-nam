@@ -41,7 +41,7 @@ int main(int argc, char** argv) {
         if (result.ec != std::errc{} || result.ptr != arg.data() + arg.size() ||
             (frames != 32 && frames != 64 && frames != 128 && frames != 512)) return 64;
     }
-    if (!paced.valid(frames, lead) || (paced.cpu_only &&
+    if (!paced.valid(frames, lead) || ((paced.cpu_only || paced.staged_gpu) &&
         (completion.policy != pulp::gpu_audio::GpuWaveNetCompletionPolicy::ProcessEvents ||
          completion.worker_wait_ns != 0))) return 64;
     paced.inject_error = inject_output_error;

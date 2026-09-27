@@ -25,5 +25,15 @@ int main() {
     if (!check(paced_sample_matches(.2f,.2f)&&!paced_sample_matches(.45f,.2f)&&
                !paced_sample_matches(std::numeric_limits<float>::quiet_NaN(),.2f)&&
                !paced_sample_matches(.2f,std::numeric_limits<float>::infinity()))) return 10;
+    GpuNamPacedOptions staged;
+    if (!check(staged.parse("--staged-gpu") && !staged.valid(128,4))) return 11;
+    staged.enabled=true; staged.sidecar="staged.csv";
+    if (!check(staged.valid(128,4))) return 12;
+    if (!check(staged.parse("--inject-forward-failure") && staged.valid(128,4))) return 13;
+    if (!check(staged.parse("--force-fallback") && !staged.valid(128,4))) return 14;
+    staged.inject_forward_failure=false;
+    if (!check(staged.valid(128,4))) return 15;
+    staged.cpu_only=true;
+    if (!check(!staged.valid(128,4))) return 16;
     std::cout<<count<<" paced option/schedule/oracle controls passed\n";
 }
