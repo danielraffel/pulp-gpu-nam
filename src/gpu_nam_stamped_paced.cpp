@@ -1,5 +1,6 @@
 #include "gpu_nam_stamped_paced.hpp"
 #include "gpu_nam_paced_delivery.hpp"
+#include "gpu_nam_paced_error.hpp"
 #include "gpu_nam_stamped_node.hpp"
 #include "gpu_nam_staged_diagnostic.hpp"
 #include <pulp/gpu_audio/gpu_audio_transport.hpp>
@@ -22,6 +23,7 @@ std::uint64_t nanoseconds(Clock::time_point t) {
 struct Row {
     std::uint64_t scheduled = 0, start = 0, end = 0, deadline = 0;
     PacedSelection selected = PacedSelection::AccountingError;
+    PacedErrorSummary error;
 };
 }
 int run_stamped_paced(const nam::NamModel& model, unsigned frames, unsigned lead,
@@ -136,18 +138,23 @@ int run_stamped_paced(const nam::NamModel& model, unsigned frames, unsigned lead
     std::vector<float> expected(stride);
     std::uint64_t mismatches = 0;
     double max_error = 0;
-    auto compare = [&](float a, float e) {
-        if (!paced_sample_matches(a,e)) ++mismatches;
-        if (std::isfinite(a) && std::isfinite(e)) max_error=std::max(max_error,std::abs(double(a)-e));
-    };
-    for (std::size_t i=0;i<lead*stride;++i) compare(actual[i],0.f);
+    for (std::uint64_t b=0;b<lead;++b)
+        for (unsigned ch=0;ch<channels;++ch)
+            for (unsigned i=0;i<frames;++i)
+                rows[b].error.compare(actual[b*stride+ch*frames+i],0.f,ch,i);
     for (std::uint64_t b=0;b<inputs_count;++b) {
         for (unsigned ch=0;ch<channels;++ch)
             oracle[ch].process(input.data()+b*stride+ch*frames,expected.data()+ch*frames,frames);
-        for (std::size_t i=0;i<stride;++i) compare(actual[(b+lead)*stride+i],expected[i]);
+        for (unsigned ch=0;ch<channels;++ch)
+            for (unsigned i=0;i<frames;++i)
+                rows[b+lead].error.compare(actual[(b+lead)*stride+ch*frames+i],expected[ch*frames+i],ch,i);
+    }
+    for (const auto& row : rows) {
+        mismatches += row.error.mismatches;
+        max_error = std::max(max_error,row.error.max_finite_abs_error);
     }
     std::uint64_t gpu=0,fallback=0,late_starts=0,deadline_misses=0,callback_ns=0,max_callback=0;
-    fprintf(sidecar,"block,delivered_input_sequence,scheduled_ns,start_ns,end_ns,deadline_ns,selected,callback_ns,start_lateness_ns,deadline_missed\n");
+    fprintf(sidecar,"block,delivered_input_sequence,scheduled_ns,start_ns,end_ns,deadline_ns,selected,callback_ns,start_lateness_ns,deadline_missed,mismatch_count,nonfinite_mismatch_count,max_finite_abs_error,first_mismatch_channel,first_mismatch_frame,first_actual,first_expected,first_mismatch_kind\n");
     for (std::uint64_t b=0;b<blocks;++b) {
         auto& row=rows[b]; const auto cost=row.end-row.start;
         const auto lateness=row.start>row.scheduled ? row.start-row.scheduled : 0;
@@ -157,15 +164,18 @@ int run_stamped_paced(const nam::NamModel& model, unsigned frames, unsigned lead
         callback_ns+=cost; max_callback=std::max(max_callback,cost);
         fprintf(sidecar,"%llu,",(unsigned long long)b);
         if (b>=lead) fprintf(sidecar,"%llu",(unsigned long long)(b-lead));
-        fprintf(sidecar,",%llu,%llu,%llu,%llu,%s,%llu,%llu,%d\n",
+        fprintf(sidecar,",%llu,%llu,%llu,%llu,%s,%llu,%llu,%d",
             (unsigned long long)row.scheduled,(unsigned long long)row.start,
             (unsigned long long)row.end,(unsigned long long)row.deadline,paced_selection_name(row.selected),
             (unsigned long long)cost,(unsigned long long)lateness,int(row.end>row.deadline));
+        row.error.write_csv_fields(sidecar);
+        std::fputc('\n',sidecar);
     }
     const bool io_ok=fflush(sidecar)==0 && !ferror(sidecar);
     const bool passed=drained && io_ok && delivery_reconciled && failed_forwards==0 && mismatches==0 && cpu_calls==blocks*channels;
     std::cout << "paced=1 engine=" << (options.cpu_only?"cpu":options.staged_gpu?"staged":"stamped")
         << " scheduling=ordinary_os_thread hard_realtime=0 sample_rate=48000 channels=2 frames=" << frames << " lead=" << lead
+        << " sidecar_schema=pulp.gpu_nam.paced.v2 input_sequence_provenance=callback_minus_lead_not_worker"
         << " input_blocks=" << inputs_count << " drain_blocks=" << lead << " measured_blocks=" << blocks
         << " completion_policy=" << (options.staged_gpu ? "legacy_blocking_readback" : completion_policy_name(completion.policy))
         << " worker_wait_ns=" << completion.worker_wait_ns

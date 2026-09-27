@@ -1,5 +1,7 @@
 #include "gpu_nam_paced_options.hpp"
 #include "gpu_nam_paced_delivery.hpp"
+#include "gpu_nam_paced_error.hpp"
+#include <string>
 #include <string_view>
 #include <iostream>
 #include <limits>
@@ -71,5 +73,34 @@ int main() {
             silence_blocks=4,passthrough_blocks=5,priming_blocks=6,invalid_blocks=7;
     };
     if (!check(paced_delivery_counts(Snapshot{})==PacedDeliveryCounts{1,2,3,4,5,6,7})) return 32;
+    auto csv_fields=[](const PacedErrorSummary& error) {
+        FILE* file=std::tmpfile();
+        if (!file) return std::string("tmpfile_failed");
+        error.write_csv_fields(file); std::rewind(file);
+        char buffer[512]{}; const auto size=std::fread(buffer,1,sizeof(buffer),file);
+        std::fclose(file); return std::string(buffer,size);
+    };
+    PacedErrorSummary clean;
+    clean.compare(.25f,.25f,0,0);
+    if (!check(clean.mismatches==0 && csv_fields(clean)==",0,0,0,,,,,none")) return 33;
+    PacedErrorSummary finite;
+    finite.compare(.5f,.25f,1,17);
+    finite.compare(.75f,.25f,0,32);
+    if (!check(finite.mismatches==2 && finite.nonfinite_mismatches==0 &&
+               finite.max_finite_abs_error==.5 && finite.first_channel==1 && finite.first_frame==17 &&
+               csv_fields(finite)==",2,0,0.5,1,17,0.5,0.25,finite")) return 34;
+    PacedErrorSummary nonfinite;
+    nonfinite.compare(std::numeric_limits<float>::quiet_NaN(),.25f,1,3);
+    nonfinite.compare(.5f,std::numeric_limits<float>::infinity(),0,4);
+    nonfinite.compare(.75f,.25f,0,5);
+    if (!check(nonfinite.mismatches==3 && nonfinite.nonfinite_mismatches==2 &&
+               nonfinite.max_finite_abs_error==.5 && nonfinite.first_channel==1 &&
+               nonfinite.first_frame==3 && std::string_view(nonfinite.first_kind())=="actual_nonfinite" &&
+               csv_fields(nonfinite).find(",1,3,nan,0.25,actual_nonfinite")!=std::string::npos)) return 35;
+    PacedErrorSummary expected_nonfinite,both_nonfinite;
+    expected_nonfinite.compare(0,std::numeric_limits<float>::infinity(),0,0);
+    both_nonfinite.compare(std::numeric_limits<float>::infinity(),std::numeric_limits<float>::infinity(),0,0);
+    if (!check(expected_nonfinite.mismatches==1 && std::string_view(expected_nonfinite.first_kind())=="expected_nonfinite" &&
+               both_nonfinite.mismatches==1 && std::string_view(both_nonfinite.first_kind())=="both_nonfinite")) return 36;
     std::cout<<count<<" paced option/schedule/oracle/delivery controls passed\n";
 }
