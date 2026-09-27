@@ -61,3 +61,26 @@ The pure C++ controls exercise stop-before-snapshot-before-deactivate ordering
 and refusal on stop/query failure. Python controls exercise whole-child timeout,
 nonzero exits and malformed/missing lifecycle evidence. They do not prove
 physical device close/unload behavior. That remains an explicit manual gate.
+
+## Bounded duration and timing interpretation
+
+The normal-lifecycle runner accepts `--duration-seconds 1..60` per epoch.
+Omitting it preserves the existing 96,256-frame capture. Explicit durations
+round up to a complete 512-frame transport quantum at 48 kHz; hardware callback
+frames remain independently recorded. Both epochs use the same duration.
+The parent defaults to at least twice the requested duration plus 15 seconds,
+with an absolute 150-second watchdog cap. Each child epoch has a separate
+duration-plus-10-second watchdog.
+
+All input, captured audio and 65,536 timing rows are allocated before audio
+starts. Row or frame capacity exhaustion fails the capture instead of silently
+truncating it. The row cap permits 60 seconds at the observed 128-frame hardware
+geometry; unusual smaller callbacks may exhaust it and are not silently accepted.
+CSV serialization remains after the SDK stop barrier.
+
+`observed_entry_ns` and `observed_exit_ns` enclose only `plugin->process`. They
+exclude start/stop processing, scratch copying and other callback bookkeeping.
+Their difference is a process-call duration, not whole callback cost, GPU latency
+or a hardware deadline measurement. Hardware timestamps and actual deadline
+misses remain unavailable. Compare these durations with nominal frames/sample
+rate only as a descriptive budget comparison.

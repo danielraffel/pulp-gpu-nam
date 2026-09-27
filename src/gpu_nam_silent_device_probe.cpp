@@ -9,6 +9,7 @@
 #include <iomanip>
 #include <memory>
 #include <filesystem>
+#include <charconv>
 #ifndef GPU_NAM_PHYSICAL_SOURCE_SHA
 #define GPU_NAM_PHYSICAL_SOURCE_SHA "unavailable"
 #endif
@@ -17,7 +18,7 @@
 #endif
 
 namespace {
-constexpr unsigned max_frames=4096, target_frames=96256, max_rows=16384;
+constexpr unsigned max_frames=4096, default_target_frames=96256, max_rows=65536;
 struct Row { std::uint64_t sample_position=0, entry_ns=0, exit_ns=0; unsigned frames=0; int status=0; };
 struct Owner {
     clap_host_t host{CLAP_VERSION,nullptr,"GPU NAM silent device diagnostic","Pulp","","1",extension,noop,noop,noop};
@@ -31,7 +32,8 @@ struct Owner {
     Events empty;
     std::atomic<bool> done{false};
     std::atomic<unsigned> entries{0}, exits{0};
-    unsigned position=0,row_count=0;
+    unsigned position=0,row_count=0,target_frames=default_target_frames;
+    unsigned row_overflow=0, frame_overflow=0;
     int error=0;
     bool began=false;
     std::uint64_t first_sample_position=0;
@@ -63,8 +65,9 @@ struct Owner {
             if(!loaded.plugin->start_processing(loaded.plugin)){finish(2);audio_thread=false;return;}
             loaded.processing=true;
         }
-        if(ctx.sample_position!=first_sample_position+position || row_count>=max_rows ||
-           position+n>target_frames+max_frames) {finish(3);audio_thread=false;return;}
+        if(row_count>=max_rows) {++row_overflow;finish(3);audio_thread=false;return;}
+        if(position+n>target_frames+max_frames) {++frame_overflow;finish(3);audio_thread=false;return;}
+        if(ctx.sample_position!=first_sample_position+position) {finish(3);audio_thread=false;return;}
         auto& row=rows[row_count++];row.sample_position=ctx.sample_position;row.frames=n;row.entry_ns=now();
         float* ip[]{input[0].data()+position,input[1].data()+position};
         float* op[]{scratch[0].data(),scratch[1].data()};
@@ -98,14 +101,22 @@ int main(int argc,char** argv) {
         return 0;
     }
     // No arguments never opens hardware. Require a concrete enumerated device ID.
-    const bool normal_lifecycle=argc==6 && std::strcmp(argv[5],"--normal-lifecycle")==0;
-    if(argc!=5 && !normal_lifecycle){std::cerr<<"usage: gpu-nam-silent-device-probe <clap-binary> <device-id> <cpu|shared> <output-prefix> [--normal-lifecycle]\n";return 64;}
+    const bool duration_arg=argc==8 && std::strcmp(argv[6],"--duration-seconds")==0;
+    const bool normal_lifecycle=(argc==6 || duration_arg) && std::strcmp(argv[5],"--normal-lifecycle")==0;
+    if(argc!=5 && !normal_lifecycle){std::cerr<<"usage: gpu-nam-silent-device-probe <clap-binary> <device-id> <cpu|shared> <output-prefix> [--normal-lifecycle [--duration-seconds 1..60]]\n";return 64;}
 #if !defined(GPU_NAM_NORMAL_PHYSICAL_LIFECYCLE)
     if(normal_lifecycle){std::cerr<<"normal lifecycle requires the pinned SDK opt-in build\n";return 78;}
 #endif
     Owner* owner=nullptr;
     const char* stage="arguments";
     try {
+        unsigned requested_seconds=0;
+        if(duration_arg) {
+            const char* end=argv[7]+std::strlen(argv[7]);
+            const auto parsed=std::from_chars(argv[7],end,requested_seconds);
+            require(parsed.ec==std::errc{} && parsed.ptr==end && requested_seconds>=1 && requested_seconds<=60,"duration must be an integer from 1 through 60 seconds");
+        }
+        const unsigned target_frames=requested_seconds ? ((requested_seconds*48000+511)/512)*512 : default_target_frames;
         const std::string mode=argv[3];require(mode=="cpu" || mode=="shared","engine must be cpu or shared");
         require(std::strlen(argv[2])>0,"explicit output device ID required");
         if(normal_lifecycle) {
@@ -118,7 +129,7 @@ int main(int argc,char** argv) {
             if(normal_lifecycle){std::ofstream journal(std::string(argv[4])+"-stage.txt");journal<<stage<<'\n';journal.close();require(bool(journal),"stage journal write failed");}
         };
         mark("load_plugin");
-        owner=new Owner; // Failure paths retain owners; normal success explicitly destroys them.
+        owner=new Owner; owner->target_frames=target_frames; // Failure paths retain owners; normal success explicitly destroys them.
         owner->api=load_plugin(owner->loaded,argv[1],owner->host);
         owner->system=pulp::audio::create_audio_system();require(bool(owner->system),"audio system unavailable");
         const auto devices=owner->system->enumerate_devices();
@@ -138,6 +149,7 @@ int main(int argc,char** argv) {
         double requested=-1;require(owner->api.params->get_value(owner->loaded.plugin,4,&requested)&&requested==engine,"inactive Engine write failed");
         for(unsigned epoch=0;epoch<(normal_lifecycle?2u:1u);++epoch) {
         owner->position=0;owner->row_count=0;owner->error=0;owner->began=false;
+        owner->row_overflow=0;owner->frame_overflow=0;
         owner->entries.store(0,std::memory_order_relaxed);owner->exits.store(0,std::memory_order_relaxed);
         owner->done.store(false,std::memory_order_release);
         mark("plugin_activate");
@@ -150,7 +162,7 @@ int main(int argc,char** argv) {
         mark("device_start");
         require(owner->device->start([owner](const auto&,auto& out,const auto& ctx){owner->callback(out,ctx);}),"device start failed");
         mark("callbacks_wait");
-        const auto timeout=std::chrono::steady_clock::now()+std::chrono::seconds(15);
+        const auto timeout=std::chrono::steady_clock::now()+std::chrono::seconds(requested_seconds ? requested_seconds+10 : 15);
         while(!owner->done.load(std::memory_order_acquire) && std::chrono::steady_clock::now()<timeout)
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
         require(owner->done.load(std::memory_order_acquire),"device callback timeout; retained graph until process exit");
@@ -187,8 +199,10 @@ int main(int argc,char** argv) {
         for(unsigned i=0;i<target_frames;++i){audio<<i<<','<<owner->capture[0][i]<<','<<owner->capture[1][i]<<'\n';energy+=double(owner->capture[0][i])*owner->capture[0][i]+double(owner->capture[1][i])*owner->capture[1][i];}
         meta<<"engine="<<mode<<"\ndevice_id="<<actual_info.id<<"\ndevice_name="<<actual_info.name
             <<"\nrequested_rate=48000\nactual_rate="<<owner->device->sample_rate()<<"\nrequested_frames=128\nopened_frames="<<owner->device->buffer_size()
-            <<"\ninput_channels=0\nphysical_output=silence\nhardware_host_timestamp=unavailable\ncallback_clock=steady_clock_observation_only"
+            <<"\ninput_channels=0\nphysical_output=silence\nhardware_host_timestamp=unavailable\ncallback_clock=steady_clock_observation_only\nclock_scope=plugin_process_call_only\nhardware_deadline_misses=unavailable"
             <<"\nauxiliary_audio_workgroup_join=not_attempted\nlifetime="<<(normal_lifecycle?"normal_lifecycle_pending":"process_retained_until_exit")<<"\nteardown_proven=false\nframes_captured="<<owner->position
+            <<"\nrequested_duration_seconds="<<requested_seconds<<"\ntarget_frames="<<target_frames
+            <<"\nrow_capacity="<<max_rows<<"\nrow_overflow="<<owner->row_overflow<<"\nframe_overflow="<<owner->frame_overflow
             <<"\nepoch="<<epoch<<"\ncallback_entries="<<owner->entries.load(std::memory_order_acquire)
             <<"\ncallback_exits="<<owner->exits.load(std::memory_order_acquire)
             <<"\nframes_compared="<<target_frames<<"\ncallbacks="<<owner->row_count<<"\npdc=1024\ngpu_selected="<<snapshot.gpu_delivered
