@@ -176,16 +176,19 @@ int main(int argc, char** argv) {
         const auto expected_block = block < lead_blocks ? std::numeric_limits<std::uint32_t>::max()
                                                 : block - lead_blocks;
         float block_max_error = 0.0f;
+        bool block_failed = false;
         for (std::uint32_t i = 0; i < block_size; ++i) {
             const float expected = expected_block == std::numeric_limits<std::uint32_t>::max()
                                        ? 0.0f
                                        : reference[expected_block][i];
             block_max_error = std::max(block_max_error, std::abs(output[i] - expected));
-            if (!close_enough(output[i], expected))
+            if (!close_enough(output[i], expected)) {
                 ++parity_failures;
+                block_failed = true;
+            }
         }
         max_error = std::max(max_error, block_max_error);
-        if (block_max_error > 0.0f) {
+        if (block_failed) {
             ++mismatch_blocks;
             if (mismatch_blocks <= 8)
                 std::cout << "mismatch_block=" << block << " expected=" << expected_block
