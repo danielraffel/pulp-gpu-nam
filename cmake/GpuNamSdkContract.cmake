@@ -1,0 +1,20 @@
+# A consumer source pin supplements the SDK producer's integrity receipt. It
+# does not authenticate archive bytes or certify runtime GPU execution.
+function(gpu_nam_validate_sdk_contract)
+    if(GPU_NAM_EXPECTED_PULP_SOURCE_SHA)
+        string(LENGTH "${GPU_NAM_EXPECTED_PULP_SOURCE_SHA}" _length)
+        if(NOT _length EQUAL 40 OR NOT GPU_NAM_EXPECTED_PULP_SOURCE_SHA MATCHES "^[0-9a-f]+$")
+            message(FATAL_ERROR "GPU_NAM_EXPECTED_PULP_SOURCE_SHA must be a full lowercase commit SHA")
+        endif()
+        if(NOT GPU_NAM_USE_INSTALLED_PULP)
+            message(FATAL_ERROR "GPU_NAM_EXPECTED_PULP_SOURCE_SHA requires installed-SDK mode")
+        endif()
+        if(NOT PULP_SDK_SOURCE_GIT_SHA STREQUAL GPU_NAM_EXPECTED_PULP_SOURCE_SHA)
+            message(FATAL_ERROR "Installed Pulp SDK source SHA does not match GPU_NAM_EXPECTED_PULP_SOURCE_SHA")
+        endif()
+    endif()
+    if(GPU_NAM_USE_INSTALLED_PULP AND GPU_NAM_EXPERIMENTAL_STAMPED_WAVENET AND
+       NOT PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
+        message(FATAL_ERROR "Stamped GPU NAM requires an installed SDK containing the Dawn shared-I/O provider")
+    endif()
+endfunction()

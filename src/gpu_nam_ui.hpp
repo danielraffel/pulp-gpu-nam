@@ -12,7 +12,8 @@
 // Middle · Treble · Output), Noise-Gate and EQ slide switches under their knobs,
 // input/output edge meters, and Model + IR file slots. A settings gear reveals
 // this demo's GPU-specific controls (audio Engine CPU/GPU + Bypass + live GPU
-// status), keeping them off the faithful face panel. Pointer input drives real
+// selections), keeping them off the faithful face panel. In the experimental
+// stamped build Engine is preparation-bound rather than live-switchable. Pointer input drives real
 // parameters through host gestures (begin/set/finish) so edits stick and record.
 
 #include "gpu_nam_processor.hpp"
@@ -487,11 +488,16 @@ private:
         // Output-Mode and Slim rows below.
         section_label(canvas, rowL, cy, "AUDIO ENGINE");
         cy += 14.0f;
-        const bool gpu = store_.get_value(kEngine) >= 0.5f;
+        const bool gpu = nam::kGpuNamPreparationBoundEngine
+                             ? proc_.requested_engine() == 1
+                             : store_.get_value(kEngine) >= 0.5f;
         settings_engine_cpu_ = seg(canvas, rowL, cy, segW, "CPU oracle", !gpu);
         settings_engine_gpu_ = seg(canvas, rowL + segW + 14.0f, cy, segW, "GPU engine", gpu);
         cy += 34.0f;
-        help(canvas, rowL, cy, "CPU (always available) or GPU (opt-in, bit-exact vs the CPU oracle).");
+        if constexpr (nam::kGpuNamPreparationBoundEngine)
+            help(canvas, rowL, cy, proc_.engine_selection_status_text());
+        else
+            help(canvas, rowL, cy, "CPU (always available) or GPU (opt-in, bit-exact vs the CPU oracle).");
         cy += 16.0f;
 
         // Output Mode as a full-width 3-segment row so Raw / Normalized / Calibrated
@@ -570,15 +576,10 @@ private:
         canvas.set_font("Roboto", ss(11.0f));
         canvas.fill_text("GPU NAM \xC2\xB7 Pulp GPU audio demo", sx(ax), sy(by + 22.0f));
         const auto g = proc_.gpu_status();
-        char buf[96];
-        if (g.active)
-            std::snprintf(buf, sizeof buf, "GPU %s \xC2\xB7 %.0f%% RT",
-                          g.backend.empty() ? "on" : g.backend.c_str(), g.rt_percent);
-        else
-            std::snprintf(buf, sizeof buf, "GPU idle (CPU oracle live)");
+        const auto delivery_label = gpu_nam_delivery_label(g.active, g.delivery);
         canvas.set_fill_color(g.active ? colors_.accent : colors_.text_dim);
         canvas.set_font("Roboto", ss(10.0f));
-        canvas.fill_text(buf, sx(ax), sy(by + 38.0f));
+        canvas.fill_text(delivery_label, sx(ax), sy(by + 38.0f));
 
         // Slim-info popover on top of everything, when toggled open.
         if (show_slim_info_ && settings_slim_count_ > 0) paint_slim_info_popover(canvas);

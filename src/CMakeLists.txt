@@ -191,6 +191,30 @@ if(TARGET pulp::render AND TARGET pulp::gpu-audio)
     add_compile_definitions(GPU_NAM_VERSION_STRING="${GPU_NAM_VERSION}")
 
     set(_gpu_nam_experimental_sources)
+    if(GPU_NAM_EXPERIMENTAL_STAMPED_WAVENET)
+        list(APPEND _gpu_nam_experimental_sources gpu_nam_stamped_node.cpp)
+        add_executable(gpu-nam-stamped-validation
+            gpu_nam_stamped_node.cpp gpu_nam_stamped_paced.cpp test_gpu_nam_stamped_node.cpp)
+        target_link_libraries(gpu-nam-stamped-validation PRIVATE pulp::gpu-audio)
+        target_compile_definitions(gpu-nam-stamped-validation PRIVATE
+            GPU_NAM_MODEL_PATH="${CMAKE_CURRENT_SOURCE_DIR}/models/example.nam")
+        if(GPU_NAM_BUILD_TESTS)
+            add_executable(gpu-nam-completion-options-test test_gpu_nam_completion_options.cpp)
+            target_link_libraries(gpu-nam-completion-options-test PRIVATE pulp::gpu-audio)
+            add_test(NAME gpu-nam-completion-options COMMAND gpu-nam-completion-options-test)
+            add_executable(gpu-nam-paced-options-test test_gpu_nam_paced_options.cpp)
+            target_compile_features(gpu-nam-paced-options-test PRIVATE cxx_std_20)
+            add_test(NAME gpu-nam-paced-options COMMAND gpu-nam-paced-options-test)
+            foreach(_lead 1 2 4 8)
+                foreach(_frames 32 64 128 512)
+                    add_test(NAME gpu-nam-stamped-${_frames}-lead-${_lead}
+                        COMMAND gpu-nam-stamped-validation ${_lead} ${_frames})
+                    set_tests_properties(gpu-nam-stamped-${_frames}-lead-${_lead} PROPERTIES
+                        TIMEOUT 60 RESOURCE_LOCK pulp_gpu)
+                endforeach()
+            endforeach()
+        endif()
+    endif()
     if(GPU_NAM_EXPERIMENTAL_SHARED_WAVENET_SESSION)
         add_executable(gpu-nam-cpu-baseline gpu_nam_cpu_baseline.cpp)
         target_link_libraries(gpu-nam-cpu-baseline PRIVATE pulp::runtime)
@@ -201,7 +225,9 @@ if(TARGET pulp::render AND TARGET pulp::gpu-audio)
     endif()
 
     set(_gpu_nam_plugin_sources gpu_nam_view.cpp)
-    if(GPU_NAM_EXPERIMENTAL_SHARED_WAVENET_SESSION)
+    if(GPU_NAM_EXPERIMENTAL_STAMPED_WAVENET)
+        list(APPEND _gpu_nam_plugin_sources gpu_nam_stamped_node.cpp)
+    elseif(GPU_NAM_EXPERIMENTAL_SHARED_WAVENET_SESSION)
         list(APPEND _gpu_nam_plugin_sources gpu_nam_shared_session_node.cpp)
     endif()
 
@@ -416,4 +442,62 @@ if(TARGET pulp::render AND TARGET pulp::gpu-audio)
                 ENVIRONMENT "PULP_DISABLE_PLUGIN_EDITOR=1;PULP_HEADLESS=1;PULP_TEST_MODE=1")
         endif()
     endif()
+endif()
+
+# This opt-in binary is acceptance instrumentation, not a distributable plugin.
+if(GPU_NAM_NATIVE_HOST_PROBE)
+    if(NOT APPLE OR NOT TARGET GpuNam_CLAP OR NOT GPU_NAM_EXPERIMENTAL_STAMPED_WAVENET)
+        message(FATAL_ERROR "Native host probe requires the macOS stamped CLAP target")
+    endif()
+    target_compile_definitions(GpuNam_CLAP PRIVATE GPU_NAM_NATIVE_HOST_PROBE=1)
+    target_link_options(GpuNam_CLAP PRIVATE "LINKER:-exported_symbol,_gpu_nam_host_probe_v1")
+    add_executable(gpu-nam-clap-host-test test_gpu_nam_clap_host.cpp)
+    target_include_directories(gpu-nam-clap-host-test PRIVATE "${PULP_CLAP_INCLUDE_DIR}")
+    target_link_libraries(gpu-nam-clap-host-test PRIVATE ${CMAKE_DL_LIBS})
+    add_dependencies(gpu-nam-clap-host-test GpuNam_CLAP)
+    add_test(NAME gpu-nam-clap-host-acceptance
+        COMMAND gpu-nam-clap-host-test $<TARGET_FILE:GpuNam_CLAP>)
+    set_tests_properties(gpu-nam-clap-host-acceptance PROPERTIES TIMEOUT 60 RESOURCE_LOCK pulp_gpu)
+endif()
+
+if(GPU_NAM_SILENT_DEVICE_PROBE)
+    if(NOT APPLE OR NOT GPU_NAM_USE_INSTALLED_PULP)
+        message(FATAL_ERROR "Silent device probe requires macOS and a complete installed SDK")
+    endif()
+    add_executable(gpu-nam-silent-device-probe EXCLUDE_FROM_ALL gpu_nam_silent_device_probe.cpp)
+    target_link_libraries(gpu-nam-silent-device-probe PRIVATE pulp::audio ${CMAKE_DL_LIBS})
+    add_dependencies(gpu-nam-silent-device-probe GpuNam_CLAP)
+    target_include_directories(gpu-nam-silent-device-probe PRIVATE
+        "${PULP_CLAP_INCLUDE_DIR}")
+    if(GPU_NAM_NORMAL_PHYSICAL_LIFECYCLE)
+        if(NOT GPU_NAM_EXPECTED_PULP_SOURCE_SHA STREQUAL "7858d7edb5a2bbb568c03d7e740043e8c897c0ee")
+            message(FATAL_ERROR "Normal physical lifecycle requires the exact reviewed admission-safe SDK7858")
+        endif()
+        execute_process(COMMAND git rev-parse HEAD WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+            OUTPUT_VARIABLE _physical_source_sha OUTPUT_STRIP_TRAILING_WHITESPACE RESULT_VARIABLE _physical_git_result)
+        execute_process(COMMAND git status --porcelain WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+            OUTPUT_VARIABLE _physical_source_dirty OUTPUT_STRIP_TRAILING_WHITESPACE RESULT_VARIABLE _physical_status_result)
+        if(NOT _physical_git_result EQUAL 0 OR NOT _physical_status_result EQUAL 0 OR NOT _physical_source_dirty STREQUAL "")
+            message(FATAL_ERROR "Physical lifecycle requires checked source provenance")
+        endif()
+        target_compile_definitions(gpu-nam-silent-device-probe PRIVATE
+            GPU_NAM_NORMAL_PHYSICAL_LIFECYCLE=1
+            GPU_NAM_PHYSICAL_SOURCE_SHA="${_physical_source_sha}"
+            GPU_NAM_PHYSICAL_SDK_SHA="${PULP_SDK_SOURCE_GIT_SHA}")
+    endif()
+    # Intentionally no add_test: opening a physical device is always manual.
+endif()
+
+if(GPU_NAM_BUILD_TESTS)
+    add_executable(gpu-nam-delivery-status-test test_gpu_nam_delivery_status.cpp)
+    target_compile_features(gpu-nam-delivery-status-test PRIVATE cxx_std_20)
+    add_test(NAME gpu-nam-delivery-status COMMAND gpu-nam-delivery-status-test)
+endif()
+
+if(GPU_NAM_BUILD_TESTS)
+    add_executable(gpu-nam-physical-lifecycle-test test_gpu_nam_physical_lifecycle.cpp)
+    add_test(NAME gpu-nam-physical-lifecycle-contract COMMAND gpu-nam-physical-lifecycle-test)
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    add_test(NAME gpu-nam-physical-watchdog-contract
+        COMMAND ${Python3_EXECUTABLE} -B ${PROJECT_SOURCE_DIR}/scripts/test_physical_lifecycle_watchdog.py)
 endif()

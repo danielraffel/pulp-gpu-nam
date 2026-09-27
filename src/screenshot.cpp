@@ -88,10 +88,11 @@ int main(int argc, char** argv) {
             std::chrono::microseconds(static_cast<long>(BLOCK / SR * 1e6)));
     }
     const auto status = proc.gpu_status();
-    std::printf("GPU NAM: engine=%s backend=%s blocks=%llu avg_us=%.0f rt%%=%.0f model=%s\n",
+    const auto delivery_label = gpu_nam_delivery_label(status.active, status.delivery);
+    std::printf("GPU NAM: engine=%s backend=%s worker_produced=%llu worker_service_us=%.0f delivery=%s model=%s\n",
                 status.active ? "GPU" : "CPU", status.backend.c_str(),
-                static_cast<unsigned long long>(status.blocks), status.avg_us,
-                status.rt_percent, proc.model_name().c_str());
+                static_cast<unsigned long long>(status.worker_produced), status.worker_service_avg_us,
+                delivery_label.c_str(), proc.model_name().c_str());
 
     ScreenshotBackend backend = ScreenshotBackend::skia;
     if (want_gpu) {

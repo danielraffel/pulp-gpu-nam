@@ -8,32 +8,26 @@
 // is re-blocked into fixed kInternalBlock chunks so the inline CPU engine and the
 // GPU engine share one re-blocking FIFO and one fixed reported latency.
 //
-// An optional, default-OFF GPU engine (the Engine knob) routes the same fixed
-// blocks through the real GPU audio runtime: a GpuNamCloudNode (one fused GPU
-// `wavenet_forward` per channel) driven by gpu_audio::GpuAudioTransport on a non-RT
-// worker. The GPU forward blocks on the device readback, so it runs only on the
-// transport worker; the audio thread calls the lock-free transport.process() and,
-// on a worker miss, the node's CpuFallback runs the exact CPU oracle. If no GPU
-// device exists the processor stays on the inline CPU engine and always works.
+// The optional GPU engine has three build-time routes. The default cloud route
+// runs blocking GPU forward/readback on a non-realtime transport worker. The
+// experimental shared-session route retains a generic worker transport. The
+// experimental stamped route selects prepared shared-buffer results on the
+// callback, with a continuously prepared CPU fallback and fixed pipeline lead.
+// Device/provider absence falls back to the inline CPU engine.
 //
-// Engine (CPU<->GPU) and the loaded model are switchable LIVE without a reload:
-// a background worker builds the requested engine stack off-thread and publishes
-// it through atomic pointers (gpu_active_ for the GPU transport, cpu_active_ for
-// the inline CPU engine) that the audio thread loads each block. The previously
-// active stack is retired and freed one rebuild later, so the audio thread never
-// holds a stack as it is freed — it never allocates or frees. Reported latency is
-// FIXED for the prepared lifetime (kInternalBlock plus the GPU transport's delay
-// when a device exists), applied to both engines so a live switch keeps the
-// host's PDC correct and dry/wet phase-aligned. See gpu_engine_active().
+// Cloud-route Engine changes can rebuild and publish a stack while playing.
+// Stamped-route Engine selection is preparation-bound: change it while inactive
+// and prepare again. Requested, prepared and effective engine remain distinct.
+// The callback never builds/frees stacks. Prepared latency includes reblocking
+// and pipeline delay and is shared by CPU/GPU paths to preserve host PDC.
+// Backend presence or worker activity alone never proves selected GPU audio.
 //
 // The native GPU front-end (input→output transfer curve + gain/mix/engine
 // controls, rendered through canvas/Skia/Dawn) is in gpu_nam_ui.hpp.
 
 #include "gpu_nam.hpp"
-#include "gpu_nam_cloud_node.hpp"
-#if defined(GPU_NAM_EXPERIMENTAL_SHARED_WAVENET_SESSION)
-#include "gpu_nam_shared_session_node.hpp"
-#endif
+#include "gpu_nam_engine.hpp"
+#include "gpu_nam_delivery_status.hpp"
 #include "nam_model.hpp"
 #include "nam_retire_list.hpp"
 #include "gpu_nam_license.hpp"
@@ -53,12 +47,6 @@
 // plists. Falls back for header-only / non-CMake builds.
 #ifndef GPU_NAM_VERSION_STRING
 #define GPU_NAM_VERSION_STRING "0.0.0-dev"
-#endif
-
-#if defined(GPU_NAM_EXPERIMENTAL_SHARED_WAVENET_SESSION)
-using GpuNamEngineNode = pulp::examples::GpuNamSharedSessionNode;
-#else
-using GpuNamEngineNode = pulp::examples::GpuNamCloudNode;
 #endif
 
 #include <pulp/format/processor.hpp>
@@ -182,7 +170,8 @@ public:
         // CPU cost once at prepare and offloads to the GPU only when the CPU can't
         // comfortably meet the block's real-time budget (see resolve_auto_engine).
         store.add_parameter({.id = kEngine, .name = "Engine", .unit = "",
-                             .range = {0.0f, 2.0f, 0.0f, 1.0f}});
+                             .range = {0.0f, 2.0f, 0.0f, 1.0f},
+                             .automatable = !nam::kGpuNamPreparationBoundEngine});
         store.add_parameter({.id = kBypass, .name = "Bypass", .unit = "",
                              .range = {0.0f, 1.0f, 0.0f, 1.0f}});
         store.add_parameter({.id = kNoiseGateThreshold, .name = "Gate", .unit = "dB",
@@ -322,6 +311,29 @@ public:
         return gpu_engine_active_.load(std::memory_order_acquire);
     }
 
+    /// Stamped experiments apply backend requests only at stopped preparation.
+    /// A live edit or state restore remains visible as pending; it cannot revive
+    /// an inactive model whose causal history stopped advancing.
+    int requested_engine() const { return resolve_engine_selection(); }
+    int prepared_engine() const { return prepared_engine_.load(std::memory_order_acquire); }
+    int effective_engine() const { return gpu_engine_active() ? 1 : 0; }
+    bool engine_change_pending() const {
+        return nam::kGpuNamPreparationBoundEngine && requested_engine() != prepared_engine();
+    }
+    const char* engine_selection_status_text() const {
+        if (engine_change_pending())
+            return requested_engine() == 1
+                       ? "CPU active. GPU requested for next activation."
+                       : (gpu_engine_active()
+                              ? "GPU path active. CPU requested for next activation."
+                              : "CPU active. CPU requested for next activation.");
+        if (requested_engine() == 1 && !gpu_engine_active())
+            return "GPU unavailable; CPU active. Retry on next activation.";
+        return gpu_engine_active()
+                   ? "GPU path active. Engine changes apply on next activation."
+                   : "CPU active. Engine changes apply on next activation.";
+    }
+
     /// The engine that Engine=Auto resolved to at prepare(): 0 = CPU, 1 = GPU.
     /// Meaningful only while the Engine parameter is Auto. UI/main-thread only.
     int auto_resolved_engine() const {
@@ -334,10 +346,11 @@ public:
         std::lock_guard<std::mutex> lock(stack_mutex_);
         if (!gpu_engine_active() || !current_stack_ || !current_stack_->node)
             return std::string();
-        return current_stack_->node->backend();
+        return current_stack_->backend;
     }
 
-    /// Live {GPU blocks produced, blocks missed (CPU-filled)}. UI/main-thread only.
+    /// Legacy {worker-produced blocks, transport misses}. UI/main-thread only.
+    /// These are not selected GPU output or proof of a CPU fallback delivery.
     std::pair<std::uint64_t, std::uint64_t> gpu_block_stats() const {
         std::lock_guard<std::mutex> lock(stack_mutex_);
         if (!gpu_engine_active() || !current_stack_ || !current_stack_->transport)
@@ -346,7 +359,21 @@ public:
         return {s.produced_blocks, s.miss_blocks};
     }
 
-    /// Live GPU cost: {last, average} wall-clock microseconds per block.
+#if defined(GPU_NAM_NATIVE_HOST_PROBE) && GPU_NAM_NATIVE_HOST_PROBE
+    /// Diagnostic host query only after stop_processing, before deactivate.
+    /// Counts callback selections, never worker-produced results.
+    gpu_audio::GpuAudioTransport::DeliverySnapshot gpu_delivery_snapshot() const {
+        std::lock_guard<std::mutex> lock(stack_mutex_);
+        if (!gpu_engine_active() || !current_stack_ || !current_stack_->transport)
+            return {};
+        return current_stack_->transport->delivery_snapshot();
+    }
+#endif
+
+    /// Worker service {last, average} wall-clock microseconds. Shared mode
+    /// samples progress-reporting service calls, possibly retiring several
+    /// results. Not GPU elapsed time, CPU consumption or deadline reliability;
+    /// not equivalent to staged per-block cost. Kept for diagnostic callers.
     std::pair<double, double> gpu_block_us() const {
         std::lock_guard<std::mutex> lock(stack_mutex_);
         if (!gpu_engine_active() || !current_stack_ || !current_stack_->transport)
@@ -355,10 +382,9 @@ public:
         return {s.last_block_us, s.avg_block_us};
     }
 
-    /// One coherent snapshot of the live GPU engine for the UI status line, taken
-    /// under a SINGLE lock so the fields can't disagree across a repaint.
-    /// `budget_us` is one GPU block's real-time budget on THIS device + sample
-    /// rate; `rt_percent` is the measured average cost as a percentage of it.
+    /// The mutex protects stack lifetime and prepared metadata. Transport
+    /// counters are independent atomic observations while callbacks run; the
+    /// lock does not make them a coherent multi-counter instant.
     struct GpuStatus {
         bool active = false;
         std::string backend;
@@ -369,31 +395,27 @@ public:
         bool capability_ready = false;
         bool fallback_available = false;
         std::uint32_t prepared_lead_blocks = 0;
-        std::uint64_t blocks = 0;
-        std::uint64_t misses = 0;
-        double avg_us = 0.0;
-        double budget_us = 0.0;
-        double rt_percent = 0.0;
+        nam::GpuNamDeliveryStatus delivery;
+        std::uint64_t worker_produced = 0;
+        std::uint64_t transport_misses = 0;
+        double worker_service_avg_us = 0.0;
     };
     GpuStatus gpu_status() const {
         std::lock_guard<std::mutex> lock(stack_mutex_);
         GpuStatus g;
         g.active = gpu_engine_active();
         if (!g.active || !current_stack_) return g;
-        if (current_stack_->node) g.backend = current_stack_->node->backend();
+        if (current_stack_->node) g.backend = current_stack_->backend;
         g.capability_report_available = current_stack_->capability_report_available;
         g.capability_ready = current_stack_->capability_ready;
         g.fallback_available = current_stack_->fallback_available;
         g.prepared_lead_blocks = current_stack_->prepared_lead_blocks;
         if (current_stack_->transport) {
             const auto s = current_stack_->transport->stats();
-            g.blocks = s.produced_blocks;
-            g.misses = s.miss_blocks;
-            g.avg_us = s.avg_block_us;
-        }
-        if (sample_rate_ > 0.0) {
-            g.budget_us = static_cast<double>(kInternalBlock) / sample_rate_ * 1e6;
-            if (g.budget_us > 0.0) g.rt_percent = g.avg_us / g.budget_us * 100.0;
+            g.worker_produced = s.produced_blocks;
+            g.transport_misses = s.miss_blocks;
+            g.worker_service_avg_us = s.avg_block_us;
+            g.delivery = nam::read_gpu_nam_delivery_status(*current_stack_->transport);
         }
         return g;
     }
@@ -672,6 +694,8 @@ public:
         // prewarmed model (needs current_cpu_ + device_available_, both ready here).
         if (state().get_value(kEngine) >= 1.5f) resolve_auto_engine();
         requested_engine_.store(resolve_engine_selection(), std::memory_order_relaxed);
+        prepared_engine_.store(requested_engine_.load(std::memory_order_relaxed),
+                               std::memory_order_release);
         if (requested_engine_.load(std::memory_order_relaxed) == 1) {
             std::lock_guard<std::mutex> lock(stack_mutex_);
             if (current_stack_) {
@@ -877,7 +901,9 @@ private:
     // node.
     struct GpuStack {
         std::unique_ptr<nam::NamModel> model;
-        std::unique_ptr<GpuNamEngineNode> node;
+        std::unique_ptr<gpu_audio::GpuAudioNode> node;
+        std::string backend;
+        nam::GpuNamPreparedProgram program;
         std::unique_ptr<gpu_audio::GpuAudioTransport> transport;
         bool capability_report_available = false;
         bool capability_ready = false;
@@ -902,7 +928,9 @@ private:
     void resolve_auto_engine() {
         int choice = 0;  // CPU
         CpuEngine* cpu = current_cpu_.get();
-        if (device_available_ && cpu) {
+        // Both shared experiments still run the full callback CPU shadow. A
+        // heavy CPU model is not evidence that this path can relieve its budget.
+        if (nam::kGpuNamAutoMayOffload && device_available_ && cpu) {
             std::vector<float> in(kInternalBlock, 0.25f), out(kInternalBlock, 0.0f);
             const auto once = [&] {
                 cpu->model[0].process(in.data(), out.data(),
@@ -1213,26 +1241,30 @@ private:
     std::unique_ptr<GpuStack> build_gpu_stack(const nam::NamModel& model) {
         auto stack = std::make_unique<GpuStack>();
         stack->model = std::make_unique<nam::NamModel>(model);
-        stack->node = std::make_unique<GpuNamEngineNode>(
-            static_cast<std::uint32_t>(kChannels),
-            static_cast<std::uint32_t>(kInternalBlock),
-            static_cast<std::uint32_t>(sample_rate_), stack->model.get());
-        if (!stack->node->prepare() || !stack->node->gpu_available()) return nullptr;
+        auto engine = nam::prepare_gpu_nam_engine(
+            stack->model.get(), static_cast<std::uint32_t>(kChannels),
+            static_cast<std::uint32_t>(kInternalBlock), static_cast<std::uint32_t>(sample_rate_));
+        if (!engine.node) return nullptr;
+        stack->node = std::move(engine.node);
+        stack->backend = std::move(engine.backend);
+        stack->program = engine.program;
 
         stack->transport = std::make_unique<gpu_audio::GpuAudioTransport>();
         gpu_audio::GpuAudioTransport::Config cfg;
         cfg.ring_blocks = 8;
         cfg.run_worker_thread = true;
+        // Stamped submission should wake promptly when the callback publishes
+        // input, matching the validated worker policy. Preparation-bound only.
+        cfg.wake_on_write = nam::kGpuNamEngineRoute == nam::GpuNamEngineRoute::Stamped;
         if (!stack->transport->prepare(stack->node.get(), cfg)) return nullptr;
 #if GPU_NAM_HAS_GPU_AUDIO_CAPABILITY_REPORT
         // Query only after prepare(), on this non-real-time stack-building
         // worker. The report is a read-only SDK contract snapshot; it does not
         // expose or imply private shared-memory provider access.
         const auto report = stack->transport->capability_report();
-        // Authenticate the node's typed preparation metadata against the
-        // transport snapshot.  This is still a staged path; the check is
-        // deliberately fail-closed and does not infer shared-memory access.
-        if (nam::validate_gpu_nam_program(stack->node->prepared_program(), report) !=
+        // Bind declared preparation to the actual transport. Shared capability
+        // still does not mean that any particular callback accepted GPU audio.
+        if (nam::bind_gpu_nam_engine_program(stack->program, report) !=
             nam::GpuNamProgramError::None)
             return nullptr;
         stack->capability_report_available = true;
@@ -1273,7 +1305,10 @@ private:
             std::lock_guard<std::mutex> lock(stack_mutex_);
             current_stack_ = std::move(fresh);
         }
-        if (requested_engine_.load(std::memory_order_relaxed) == 1) {
+        const int target = nam::kGpuNamPreparationBoundEngine
+                               ? prepared_engine_.load(std::memory_order_acquire)
+                               : requested_engine_.load(std::memory_order_relaxed);
+        if (target == 1) {
             gpu_active_.store(tp, std::memory_order_seq_cst);   // reader loads this, then it retires
             gpu_engine_active_.store(true, std::memory_order_release);
         }
@@ -1559,8 +1594,10 @@ private:
                 else               build_and_publish_ir(ipath);
             }
 
-            // Engine toggle (GPU publish/unpublish; the stack stays built).
-            if (device_available_) {
+            // Stamped backend changes require stopped preparation: publishing an
+            // inactive stack here would resume stale WaveNet causal history.
+            // Default and legacy adapters retain their existing toggle behavior.
+            if (!nam::kGpuNamPreparationBoundEngine && device_available_) {
                 const int want = requested_engine_.load(std::memory_order_relaxed);
                 if (want == 1 && gpu_active_.load(std::memory_order_relaxed) == nullptr) {
                     gpu_audio::GpuAudioTransport* tp = nullptr;
@@ -1693,6 +1730,7 @@ private:
     std::thread worker_;
     std::atomic<bool> worker_run_{false};
     std::atomic<int> requested_engine_{0};
+    std::atomic<int> prepared_engine_{0};
     // Engine=Auto resolves to this (0 = CPU, 1 = GPU), decided at prepare().
     std::atomic<int> auto_resolved_engine_{0};
     std::mutex model_req_mutex_;

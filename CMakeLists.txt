@@ -36,6 +36,22 @@ endif()
 # private Catch2 so the plugin tests build without turning on Pulp's whole
 # test tree.
 option(GPU_NAM_BUILD_TESTS "Build GPU NAM's own test suite" ON)
+option(GPU_NAM_NATIVE_HOST_PROBE
+    "Add a diagnostic-only CLAP query and host test (never distribute this build)" OFF)
+if(GPU_NAM_NATIVE_HOST_PROBE AND NOT GPU_NAM_BUILD_TESTS)
+    message(FATAL_ERROR "GPU_NAM_NATIVE_HOST_PROBE requires GPU_NAM_BUILD_TESTS")
+endif()
+
+option(GPU_NAM_NORMAL_PHYSICAL_LIFECYCLE
+    "Permit manual normal lifecycle testing against the pinned admission-safe SDK" OFF)
+option(GPU_NAM_SILENT_DEVICE_PROBE
+    "Build manual silent physical audio callback probe (never registered with CTest)" OFF)
+if(GPU_NAM_NORMAL_PHYSICAL_LIFECYCLE AND NOT GPU_NAM_SILENT_DEVICE_PROBE)
+    message(FATAL_ERROR "Normal physical lifecycle requires GPU_NAM_SILENT_DEVICE_PROBE")
+endif()
+if(GPU_NAM_SILENT_DEVICE_PROBE AND NOT GPU_NAM_NATIVE_HOST_PROBE)
+    message(FATAL_ERROR "Silent device probe requires GPU_NAM_NATIVE_HOST_PROBE")
+endif()
 
 option(GPU_NAM_BUILD_GPU_AUDIO_CAPABILITY_PROBE
     "Build the optional Pulp GPU-audio capability compatibility probe" ON)
@@ -46,6 +62,14 @@ option(GPU_NAM_BUILD_GPU_AUDIO_CAPABILITY_PROBE
 # intentionally stays on the released legacy API.
 option(GPU_NAM_EXPERIMENTAL_SHARED_WAVENET_SESSION
     "Build the provisional shared-memory WaveNet session adapter (default OFF)" OFF)
+option(GPU_NAM_EXPERIMENTAL_STAMPED_WAVENET
+    "Build SDK-owned stamped WaveNet consumer validation (requires new SDK)" OFF)
+if(GPU_NAM_EXPERIMENTAL_STAMPED_WAVENET AND GPU_NAM_EXPERIMENTAL_SHARED_WAVENET_SESSION)
+    message(FATAL_ERROR "Select only one experimental WaveNet adapter")
+endif()
+if(GPU_NAM_EXPERIMENTAL_STAMPED_WAVENET)
+    add_compile_definitions(GPU_NAM_EXPERIMENTAL_STAMPED_WAVENET=1)
+endif()
 if(GPU_NAM_EXPERIMENTAL_SHARED_WAVENET_SESSION)
     add_compile_definitions(GPU_NAM_EXPERIMENTAL_SHARED_WAVENET_SESSION=1)
 endif()
@@ -58,6 +82,13 @@ endif()
 option(GPU_NAM_USE_INSTALLED_PULP
     "Build against an installed Pulp SDK (find_package(Pulp)) instead of the ./pulp submodule" OFF)
 
+set(GPU_NAM_EXPECTED_PULP_SOURCE_SHA "" CACHE STRING
+    "Optional exact installed Pulp SDK source commit for validation")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/GpuNamSdkContract.cmake")
+if(NOT GPU_NAM_USE_INSTALLED_PULP)
+    gpu_nam_validate_sdk_contract()
+endif()
+
 if(GPU_NAM_USE_INSTALLED_PULP)
     # find_package(Pulp) provides the exported targets (pulp::format, pulp::render,
     # pulp::gpu-audio, pulp::signal, pulp::view, pulp::canvas, pulp::runtime) and the
@@ -65,6 +96,7 @@ if(GPU_NAM_USE_INSTALLED_PULP)
     # relocatable-bundle helpers (PulpBundleRelocatable), both included by
     # PulpConfig.cmake — so none of the submodule wiring below runs.
     find_package(Pulp REQUIRED GLOBAL)
+    gpu_nam_validate_sdk_contract()
     message(STATUS "GPU NAM: building against installed Pulp SDK ${Pulp_VERSION} (${Pulp_DIR})")
 
     # The install export namespaces targets as Pulp:: ; the in-tree submodule
@@ -157,3 +189,9 @@ if(GPU_NAM_BUILD_TESTS OR GPU_NAM_BUILD_GPU_AUDIO_CAPABILITY_PROBE OR
 endif()
 
 add_subdirectory(src)
+
+if(GPU_NAM_BUILD_TESTS)
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    add_test(NAME gpu-nam-sdk-contract
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_sdk_contract.py)
+endif()
