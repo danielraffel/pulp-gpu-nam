@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <iostream>
 #include <limits>
 #include <string>
@@ -16,9 +17,9 @@ namespace {
 
 using Clock = std::chrono::steady_clock;
 using Nanoseconds = std::chrono::nanoseconds;
-constexpr std::uint32_t kBlockSize = 32;
+
 constexpr std::uint32_t kSampleRate = 48'000;
-constexpr std::uint32_t kBlocks = 96;
+
 
 std::uint64_t elapsed_ns(Clock::time_point start, Clock::time_point end) {
     return static_cast<std::uint64_t>(
@@ -32,7 +33,19 @@ bool close_enough(float actual, float expected) {
 
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
+    std::uint32_t block_size = 32, lead_blocks = 1, blocks = 96;
+    for (int i = 1; i < argc; ++i) {
+        std::string arg(argv[i]);
+        auto parse = [&](const char* prefix, std::uint32_t& out) {
+            if (arg.rfind(prefix, 0) == 0) { try { out = static_cast<std::uint32_t>(std::stoul(arg.substr(std::strlen(prefix)))); } catch (...) { out = 0; } return true; } return false;
+        };
+        parse("--block-size=", block_size) || parse("--lead-blocks=", lead_blocks);
+    }
+    if ((block_size != 32 && block_size != 64 && block_size != 128) ||
+        (lead_blocks != 1 && lead_blocks != 2 && lead_blocks != 4 && lead_blocks != 8)) {
+        std::cerr << "unsupported block/lead\n"; return 2;
+    }
     pulp::examples::nam::NamModel model;
     std::string error;
     if (!pulp::examples::nam::load_nam(GPU_NAM_MODEL_PATH, model, &error)) {
@@ -43,41 +56,41 @@ int main() {
     // Build the reference before starting the cadence run.  It is the same
     // model and exact input sequence that the shared GPU adapter receives.
     pulp::examples::nam::NamModel oracle = model;
-    oracle.prewarm_block_aligned(kBlockSize);
-    std::vector<std::vector<float>> inputs(kBlocks, std::vector<float>(kBlockSize));
-    std::vector<std::vector<float>> reference(kBlocks, std::vector<float>(kBlockSize));
-    for (std::uint32_t block = 0; block < kBlocks; ++block) {
-        for (std::uint32_t i = 0; i < kBlockSize; ++i) {
-            const auto sample = static_cast<float>(block * kBlockSize + i);
+    oracle.prewarm_block_aligned(block_size);
+    std::vector<std::vector<float>> inputs(blocks, std::vector<float>(block_size));
+    std::vector<std::vector<float>> reference(blocks, std::vector<float>(block_size));
+    for (std::uint32_t block = 0; block < blocks; ++block) {
+        for (std::uint32_t i = 0; i < block_size; ++i) {
+            const auto sample = static_cast<float>(block * block_size + i);
             inputs[block][i] = 0.07f * std::sin(0.013f * sample)
                                + 0.02f * std::cos(0.037f * sample);
         }
-        oracle.process(inputs[block].data(), reference[block].data(), kBlockSize);
+        oracle.process(inputs[block].data(), reference[block].data(), block_size);
     }
 
     // Measure the callback-facing continuous fallback separately.  This is a
     // CPU cost measurement only, not a realtime claim; the transport run below
     // remains the matched GPU/shared-memory path.
-    pulp::examples::GpuNamSharedSessionNode fallback_node(1, kBlockSize, kSampleRate, &model);
+    pulp::examples::GpuNamSharedSessionNode fallback_node(1, block_size, kSampleRate, &model, lead_blocks);
     if (!fallback_node.prepare()) {
         std::cerr << "fallback_prepare=0\n";
         return 1;
     }
-    std::vector<float> fallback_output(kBlockSize, 0.0f);
+    std::vector<float> fallback_output(block_size, 0.0f);
     const float* fallback_input_ptr[] = {inputs[0].data()};
     float* fallback_output_ptr[] = {fallback_output.data()};
-    pulp::audio::BufferView<const float> fallback_input(fallback_input_ptr, 1, kBlockSize);
-    pulp::audio::BufferView<float> fallback_view(fallback_output_ptr, 1, kBlockSize);
+    pulp::audio::BufferView<const float> fallback_input(fallback_input_ptr, 1, block_size);
+    pulp::audio::BufferView<float> fallback_view(fallback_output_ptr, 1, block_size);
     std::uint64_t fallback_cpu_ns = 0;
     for (const auto& block : inputs) {
         fallback_input_ptr[0] = block.data();
         const auto start = Clock::now();
-        fallback_node.prime_fallback(fallback_input, kBlockSize);
-        fallback_node.process_cpu_fallback(fallback_input, fallback_view, kBlockSize);
+        fallback_node.prime_fallback(fallback_input, block_size);
+        fallback_node.process_cpu_fallback(fallback_input, fallback_view, block_size);
         fallback_cpu_ns += elapsed_ns(start, Clock::now());
     }
 
-    pulp::examples::GpuNamSharedSessionNode node(1, kBlockSize, kSampleRate, &model);
+    pulp::examples::GpuNamSharedSessionNode node(1, block_size, kSampleRate, &model, lead_blocks);
     if (!node.prepare()) {
         std::cerr << "shared_prepare=0\n";
         return 1;
@@ -93,23 +106,23 @@ int main() {
     // Isolate the adapter/model from transport PDC.  This direct sequence
     // should match the CPU oracle at the same block index; any discrepancy
     // here is a model/session issue rather than transport disposition.
-    pulp::examples::GpuNamSharedSessionNode direct_node(1, kBlockSize, kSampleRate, &model);
+    pulp::examples::GpuNamSharedSessionNode direct_node(1, block_size, kSampleRate, &model, lead_blocks);
     if (!direct_node.prepare()) {
         std::cerr << "direct_prepare=0\n";
         return 1;
     }
-    std::vector<float> direct_output(kBlockSize, 0.0f);
+    std::vector<float> direct_output(block_size, 0.0f);
     const float* direct_input_ptr[] = {inputs[0].data()};
     float* direct_output_ptr[] = {direct_output.data()};
-    pulp::audio::BufferView<const float> direct_input(direct_input_ptr, 1, kBlockSize);
-    pulp::audio::BufferView<float> direct_view(direct_output_ptr, 1, kBlockSize);
+    pulp::audio::BufferView<const float> direct_input(direct_input_ptr, 1, block_size);
+    pulp::audio::BufferView<float> direct_view(direct_output_ptr, 1, block_size);
     std::uint32_t direct_failures = 0;
     std::uint32_t direct_mismatch_blocks = 0;
-    for (std::uint32_t block = 0; block < kBlocks; ++block) {
+    for (std::uint32_t block = 0; block < blocks; ++block) {
         direct_input_ptr[0] = inputs[block].data();
-        direct_node.process_block(direct_input, direct_view, kBlockSize);
+        direct_node.process_block(direct_input, direct_view, block_size);
         bool block_mismatch = false;
-        for (std::uint32_t i = 0; i < kBlockSize; ++i)
+        for (std::uint32_t i = 0; i < block_size; ++i)
             if (!close_enough(direct_output[i], reference[block][i])) {
                 ++direct_failures;
                 block_mismatch = true;
@@ -129,11 +142,11 @@ int main() {
         return 1;
     }
 
-    std::vector<float> output(kBlockSize, 0.0f);
+    std::vector<float> output(block_size, 0.0f);
     const float* input_ptr[] = {inputs[0].data()};
     float* output_ptr[] = {output.data()};
-    pulp::audio::BufferView<const float> input_view(input_ptr, 1, kBlockSize);
-    pulp::audio::BufferView<float> output_view(output_ptr, 1, kBlockSize);
+    pulp::audio::BufferView<const float> input_view(input_ptr, 1, block_size);
+    pulp::audio::BufferView<float> output_view(output_ptr, 1, block_size);
     std::uint64_t callback_total_ns = 0;
     std::uint64_t callback_max_ns = 0;
     std::uint64_t late_total_ns = 0;
@@ -141,12 +154,12 @@ int main() {
     std::uint32_t mismatch_blocks = 0;
     float max_error = 0.0f;
     const auto cadence_origin = Clock::now();
-    for (std::uint32_t block = 0; block < kBlocks; ++block) {
+    for (std::uint32_t block = 0; block < blocks; ++block) {
         // Absolute scheduling: every deadline is derived from the origin.  A
         // slow callback delays only its own start; its processing time is not
         // added to the next sleep period.
         const auto deadline = cadence_origin
-            + Nanoseconds(static_cast<std::int64_t>(block) * kBlockSize * 1'000'000'000LL
+            + Nanoseconds(static_cast<std::int64_t>(block) * block_size * 1'000'000'000LL
                           / kSampleRate);
         std::this_thread::sleep_until(deadline);
         const auto callback_start = Clock::now();
@@ -155,15 +168,15 @@ int main() {
 
         input_ptr[0] = inputs[block].data();
         const auto start = Clock::now();
-        transport.process(input_view, output_view, kBlockSize);
+        transport.process(input_view, output_view, block_size);
         const auto cost = elapsed_ns(start, Clock::now());
         callback_total_ns += cost;
         callback_max_ns = std::max(callback_max_ns, cost);
 
-        const auto expected_block = block == 0 ? std::numeric_limits<std::uint32_t>::max()
-                                                : block - 1;
+        const auto expected_block = block < lead_blocks ? std::numeric_limits<std::uint32_t>::max()
+                                                : block - lead_blocks;
         float block_max_error = 0.0f;
-        for (std::uint32_t i = 0; i < kBlockSize; ++i) {
+        for (std::uint32_t i = 0; i < block_size; ++i) {
             const float expected = expected_block == std::numeric_limits<std::uint32_t>::max()
                                        ? 0.0f
                                        : reference[expected_block][i];
@@ -185,7 +198,7 @@ int main() {
     const auto gpu_blocks = node.gpu_delivered_blocks();
     const auto fallback_blocks = node.cpu_fallback_blocks();
     const auto primed_blocks = node.fallback_prime_blocks();
-    std::cout << "blocks=" << kBlocks
+    std::cout << "blocks=" << blocks
               << " provider_available=" << (provider_available ? 1 : 0)
               << " gpu_delivered=" << gpu_blocks
               << " cpu_fallback=" << fallback_blocks
@@ -203,7 +216,7 @@ int main() {
               << " worker_avg_us=" << stats_before_release.avg_block_us
               << '\n';
 
-    if (gpu_blocks == 0 || parity_failures != 0 || primed_blocks != kBlocks) {
+    if (gpu_blocks == 0 || parity_failures != 0 || primed_blocks != blocks) {
         std::cout << "diagnostic_status=failed\n";
         return 3;
     }
