@@ -222,3 +222,30 @@ TEST_CASE("experimental shared WaveNet fallback is exercised through transport m
     }
     CHECK(transport.stats().miss_blocks >= 9);
 }
+
+TEST_CASE("experimental shared WaveNet fallback honors a two-block delay ring",
+          "[gpu_nam][gpu_audio][experimental][fallback][lead]") {
+    pulp::examples::nam::NamModel model;
+    std::string error;
+    REQUIRE(pulp::examples::nam::load_nam(GPU_NAM_MODEL_PATH, model, &error));
+    GpuNamSharedSessionNode node(1, 32, 48'000, &model, 2);
+    REQUIRE(node.prepare());
+    pulp::examples::nam::NamModel oracle = model;
+    oracle.prewarm_block_aligned(32);
+    std::vector<float> input(32), expected(32), output(32), due0(32, 0.0f), due1(32, 0.0f);
+    const float* in_ptr[] = {input.data()};
+    float* out_ptr[] = {output.data()};
+    pulp::audio::BufferView<const float> in_view(in_ptr, 1, 32);
+    pulp::audio::BufferView<float> out_view(out_ptr, 1, 32);
+    for (int block = 0; block < 6; ++block) {
+        std::fill(input.begin(), input.end(), 0.01f * static_cast<float>(block + 1));
+        oracle.process(input.data(), expected.data(), 32);
+        node.prime_fallback(in_view, 32);
+        node.process_cpu_fallback(in_view, out_view, 32);
+        const auto& due = (block & 1) == 0 ? due0 : due1;
+        for (std::size_t i = 0; i < output.size(); ++i)
+            CHECK(std::abs(output[i] - due[i]) < 1.0e-6f);
+        if ((block & 1) == 0) due0 = expected;
+        else due1 = expected;
+    }
+}
