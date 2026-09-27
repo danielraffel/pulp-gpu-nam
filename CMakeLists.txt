@@ -48,6 +48,12 @@ option(GPU_NAM_EXPERIMENTAL_SHARED_WAVENET_SESSION
     "Build the provisional shared-memory WaveNet session adapter (default OFF)" OFF)
 option(GPU_NAM_EXPERIMENTAL_STAMPED_WAVENET
     "Build SDK-owned stamped WaveNet consumer validation (requires new SDK)" OFF)
+if(GPU_NAM_EXPERIMENTAL_STAMPED_WAVENET AND GPU_NAM_EXPERIMENTAL_SHARED_WAVENET_SESSION)
+    message(FATAL_ERROR "Select only one experimental WaveNet adapter")
+endif()
+if(GPU_NAM_EXPERIMENTAL_STAMPED_WAVENET)
+    add_compile_definitions(GPU_NAM_EXPERIMENTAL_STAMPED_WAVENET=1)
+endif()
 if(GPU_NAM_EXPERIMENTAL_SHARED_WAVENET_SESSION)
     add_compile_definitions(GPU_NAM_EXPERIMENTAL_SHARED_WAVENET_SESSION=1)
 endif()

@@ -192,6 +192,7 @@ if(TARGET pulp::render AND TARGET pulp::gpu-audio)
 
     set(_gpu_nam_experimental_sources)
     if(GPU_NAM_EXPERIMENTAL_STAMPED_WAVENET)
+        list(APPEND _gpu_nam_experimental_sources gpu_nam_stamped_node.cpp)
         add_executable(gpu-nam-stamped-validation
             gpu_nam_stamped_node.cpp test_gpu_nam_stamped_node.cpp)
         target_link_libraries(gpu-nam-stamped-validation PRIVATE pulp::gpu-audio)
@@ -218,7 +219,9 @@ if(TARGET pulp::render AND TARGET pulp::gpu-audio)
     endif()
 
     set(_gpu_nam_plugin_sources gpu_nam_view.cpp)
-    if(GPU_NAM_EXPERIMENTAL_SHARED_WAVENET_SESSION)
+    if(GPU_NAM_EXPERIMENTAL_STAMPED_WAVENET)
+        list(APPEND _gpu_nam_plugin_sources gpu_nam_stamped_node.cpp)
+    elseif(GPU_NAM_EXPERIMENTAL_SHARED_WAVENET_SESSION)
         list(APPEND _gpu_nam_plugin_sources gpu_nam_shared_session_node.cpp)
     endif()
 
