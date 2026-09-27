@@ -16,7 +16,7 @@ with tempfile.TemporaryDirectory() as temporary:
     good={'schema':'gpu-nam.physical-lifecycle.v1','epochs':2,'callback_owner_drain':True,'stop_restart_close':True,'plugin_destroy_deinit_dlclose':True,'physical_output':'silence'}
     check(child_result(0,False,receipt)[0] is False)
     for malformed in ['', '{', 'null', '[]']:
-        receipt.write_text(malformed);check(child_result(0,False,receipt)[0] is False)
+        receipt.write_text(malformed);check(child_result(0,False,receipt)==(False,None))
     receipt.write_text(json.dumps(good));check(child_result(0,False,receipt)[0])
     check(not child_result(78,False,receipt)[0]);check(not child_result(0,True,receipt)[0])
     for k in good:

@@ -15,7 +15,7 @@ def child_result(code,timed_out,receipt):
     if code!=0 or timed_out:return False,None
     try:child=json.loads(receipt.read_text())
     except (OSError,ValueError):return False,None
-    if not isinstance(child,dict):return False,child
+    if not isinstance(child,dict):return False,None
     passed=child.get('schema')=='gpu-nam.physical-lifecycle.v1' and child.get('epochs')==2 and all(
         child.get(k) is True for k in ['callback_owner_drain','stop_restart_close','plugin_destroy_deinit_dlclose'])
     passed=passed and child.get('physical_output')=='silence'
