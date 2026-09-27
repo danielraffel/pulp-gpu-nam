@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <ctime>
 #include <cstring>
 #include <iostream>
 #include <limits>
@@ -150,6 +151,7 @@ int main(int argc, char** argv) {
     pulp::audio::BufferView<const float> input_view(input_ptr, 1, block_size);
     pulp::audio::BufferView<float> output_view(output_ptr, 1, block_size);
     std::uint64_t callback_total_ns = 0;
+    const auto process_cpu_start = std::clock();
     std::uint64_t callback_max_ns = 0;
     std::uint64_t late_total_ns = 0;
     std::uint32_t parity_failures = 0;
@@ -199,13 +201,14 @@ int main(int argc, char** argv) {
     }
 
     const auto stats_before_release = transport.stats();
+    const auto process_cpu_end = std::clock();
     transport.release();
     const auto gpu_blocks = node.gpu_delivered_blocks();
     const auto fallback_blocks = node.cpu_fallback_blocks();
     const auto primed_blocks = node.fallback_prime_blocks();
     std::cout << "blocks=" << blocks
               << " provider_available=" << (provider_available ? 1 : 0)
-              << " gpu_delivered=" << gpu_blocks
+              << " gpu_inner_completions=" << gpu_blocks
               << " cpu_fallback=" << fallback_blocks
               << " fallback_primed=" << primed_blocks
               << " produced=" << stats_before_release.produced_blocks
@@ -214,14 +217,16 @@ int main(int argc, char** argv) {
               << " parity_failures=" << parity_failures
               << " mismatch_blocks=" << mismatch_blocks
               << " max_error=" << max_error
-              << " fallback_cpu_total_ns=" << fallback_cpu_ns
+              << " fallback_cpu_elapsed_ns=" << fallback_cpu_ns
+              << " process_cpu_ticks=" << (process_cpu_end - process_cpu_start)
+              << " process_cpu_seconds=" << (double(process_cpu_end - process_cpu_start) / CLOCKS_PER_SEC)
               << " callback_total_ns=" << callback_total_ns
               << " callback_max_ns=" << callback_max_ns
               << " callback_late_total_ns=" << late_total_ns
               << " worker_avg_us=" << stats_before_release.avg_block_us
               << '\n';
 
-    if (gpu_blocks == 0 || parity_failures != 0 || primed_blocks != blocks) {
+    if (gpu_blocks == 0 || direct_failures != 0 || parity_failures != 0 || primed_blocks != blocks) {
         std::cout << "diagnostic_status=failed\n";
         return 3;
     }
