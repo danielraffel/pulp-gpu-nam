@@ -181,9 +181,19 @@ if(TARGET pulp::render AND TARGET pulp::gpu-audio)
     set(GPU_NAM_VERSION "1.2.4")
     add_compile_definitions(GPU_NAM_VERSION_STRING="${GPU_NAM_VERSION}")
 
+    set(_gpu_nam_experimental_sources)
+    if(GPU_NAM_EXPERIMENTAL_SHARED_WAVENET_SESSION)
+        list(APPEND _gpu_nam_experimental_sources gpu_nam_shared_session_node.cpp)
+    endif()
+
+    set(_gpu_nam_plugin_sources gpu_nam_view.cpp)
+    if(GPU_NAM_EXPERIMENTAL_SHARED_WAVENET_SESSION)
+        list(APPEND _gpu_nam_plugin_sources gpu_nam_shared_session_node.cpp)
+    endif()
+
     pulp_add_plugin(GpuNam
         FORMATS           VST3 AU CLAP Standalone
-        SOURCES           gpu_nam_view.cpp
+        SOURCES           ${_gpu_nam_plugin_sources}
         PLUGIN_NAME       "GpuNam"
         BUNDLE_ID         "com.pulp.gpunam"
         MANUFACTURER      "Pulp"
@@ -281,7 +291,8 @@ if(TARGET pulp::render AND TARGET pulp::gpu-audio)
 
     # Headless editor screenshot. macOS-only dev tool (Skia raster capture).
     if(APPLE AND (TARGET pulp::view OR TARGET Pulp::view))
-        add_executable(gpu-nam-shot screenshot.cpp gpu_nam_view.cpp)
+        add_executable(gpu-nam-shot screenshot.cpp gpu_nam_view.cpp
+                       ${_gpu_nam_experimental_sources})
         target_link_libraries(gpu-nam-shot PRIVATE
             pulp::format pulp::audio pulp::render pulp::gpu-audio pulp::signal
             pulp::view pulp::canvas pulp::runtime)
@@ -293,7 +304,8 @@ if(TARGET pulp::render AND TARGET pulp::gpu-audio)
 
     # Performance harness (CPU oracle vs GPU engine, realtime ratio across block
     # sizes). A dev tool like gpu-nam-shot; not built into the shipped plugin.
-    add_executable(gpu-nam-bench bench.cpp gpu_nam_view.cpp)
+    add_executable(gpu-nam-bench bench.cpp gpu_nam_view.cpp
+                   ${_gpu_nam_experimental_sources})
     target_link_libraries(gpu-nam-bench PRIVATE
         pulp::format pulp::render pulp::gpu-audio pulp::signal
         pulp::view pulp::canvas pulp::runtime)
@@ -306,7 +318,8 @@ if(TARGET pulp::render AND TARGET pulp::gpu-audio)
     # gpu_nam_view.cpp so the processor's vtable (first non-inline virtual is
     # create_view()) resolves at link time; the view is never CALLED headless.
     if(GPU_NAM_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
-        add_executable(gpu-nam-plugin-test test_gpu_nam_plugin.cpp gpu_nam_view.cpp)
+        add_executable(gpu-nam-plugin-test test_gpu_nam_plugin.cpp gpu_nam_view.cpp
+                        ${_gpu_nam_experimental_sources})
         target_link_libraries(gpu-nam-plugin-test PRIVATE
             pulp::format pulp::render pulp::gpu-audio pulp::signal
             pulp::view pulp::canvas pulp::runtime Catch2::Catch2WithMain)
@@ -317,10 +330,25 @@ if(TARGET pulp::render AND TARGET pulp::gpu-audio)
             GPU_NAM_ASSET_DIR="${GPU_NAM_ASSETS}")
         catch_discover_tests(gpu-nam-plugin-test)
 
+        if(GPU_NAM_EXPERIMENTAL_SHARED_WAVENET_SESSION)
+            add_executable(gpu-nam-shared-session-adapter-test
+                           test_gpu_nam_shared_session_adapter.cpp
+                           gpu_nam_shared_session_node.cpp)
+            target_link_libraries(gpu-nam-shared-session-adapter-test PRIVATE
+                pulp::gpu-audio pulp::runtime Catch2::Catch2WithMain)
+            target_include_directories(gpu-nam-shared-session-adapter-test PRIVATE
+                ${CMAKE_CURRENT_SOURCE_DIR})
+            target_compile_definitions(gpu-nam-shared-session-adapter-test PRIVATE
+                GPU_NAM_MODEL_PATH="${CMAKE_CURRENT_SOURCE_DIR}/models/example.nam")
+            add_test(NAME gpu-nam-shared-session-adapter-test
+                     COMMAND gpu-nam-shared-session-adapter-test)
+        endif()
+
         # Editor tests: faithful UI renders non-blank + composited (Skia), and
         # pointer input (toggles, knob drag) drives real parameters.
         if(APPLE AND (TARGET pulp::view OR TARGET Pulp::view))
-            add_executable(gpu-nam-ui-test test_gpu_nam_ui.cpp gpu_nam_view.cpp)
+            add_executable(gpu-nam-ui-test test_gpu_nam_ui.cpp gpu_nam_view.cpp
+                            ${_gpu_nam_experimental_sources})
             target_link_libraries(gpu-nam-ui-test PRIVATE
                 pulp::format pulp::render pulp::gpu-audio pulp::signal
                 pulp::view pulp::canvas pulp::runtime Catch2::Catch2WithMain)
