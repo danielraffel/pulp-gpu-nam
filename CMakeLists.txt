@@ -42,6 +42,12 @@ if(GPU_NAM_NATIVE_HOST_PROBE AND NOT GPU_NAM_BUILD_TESTS)
     message(FATAL_ERROR "GPU_NAM_NATIVE_HOST_PROBE requires GPU_NAM_BUILD_TESTS")
 endif()
 
+option(GPU_NAM_SILENT_DEVICE_PROBE
+    "Build manual silent physical audio callback probe (never registered with CTest)" OFF)
+if(GPU_NAM_SILENT_DEVICE_PROBE AND NOT GPU_NAM_NATIVE_HOST_PROBE)
+    message(FATAL_ERROR "Silent device probe requires GPU_NAM_NATIVE_HOST_PROBE")
+endif()
+
 option(GPU_NAM_BUILD_GPU_AUDIO_CAPABILITY_PROBE
     "Build the optional Pulp GPU-audio capability compatibility probe" ON)
 

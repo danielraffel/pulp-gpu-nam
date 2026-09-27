@@ -459,3 +459,15 @@ if(GPU_NAM_NATIVE_HOST_PROBE)
         COMMAND gpu-nam-clap-host-test $<TARGET_FILE:GpuNam_CLAP>)
     set_tests_properties(gpu-nam-clap-host-acceptance PROPERTIES TIMEOUT 60 RESOURCE_LOCK pulp_gpu)
 endif()
+
+if(GPU_NAM_SILENT_DEVICE_PROBE)
+    if(NOT APPLE OR NOT GPU_NAM_USE_INSTALLED_PULP)
+        message(FATAL_ERROR "Silent device probe requires macOS and a complete installed SDK")
+    endif()
+    add_executable(gpu-nam-silent-device-probe EXCLUDE_FROM_ALL gpu_nam_silent_device_probe.cpp)
+    target_link_libraries(gpu-nam-silent-device-probe PRIVATE pulp::audio ${CMAKE_DL_LIBS})
+    add_dependencies(gpu-nam-silent-device-probe GpuNam_CLAP)
+    target_include_directories(gpu-nam-silent-device-probe PRIVATE
+        "${PULP_CLAP_INCLUDE_DIR}")
+    # Intentionally no add_test: opening a physical device is always manual.
+endif()
