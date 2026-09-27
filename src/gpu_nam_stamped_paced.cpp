@@ -123,7 +123,7 @@ int run_stamped_paced(const nam::NamModel& model, unsigned frames, unsigned lead
         for (std::size_t i=0;i<stride;++i) compare(actual[(b+lead)*stride+i],expected[i]);
     }
     std::uint64_t gpu=0,fallback=0,late_starts=0,deadline_misses=0,callback_ns=0,max_callback=0;
-    fprintf(sidecar,"block,scheduled_ns,start_ns,end_ns,deadline_ns,selected,callback_ns,start_lateness_ns,deadline_missed\n");
+    fprintf(sidecar,"block,delivered_input_sequence,scheduled_ns,start_ns,end_ns,deadline_ns,selected,callback_ns,start_lateness_ns,deadline_missed\n");
     for (std::uint64_t b=0;b<blocks;++b) {
         const auto& row=rows[b]; const auto cost=row.end-row.start;
         const auto lateness=row.start>row.scheduled ? row.start-row.scheduled : 0;
@@ -131,8 +131,10 @@ int run_stamped_paced(const nam::NamModel& model, unsigned frames, unsigned lead
         fallback += std::string_view(row.selected)=="cpu_fallback";
         late_starts += lateness!=0; deadline_misses += row.end>row.deadline;
         callback_ns+=cost; max_callback=std::max(max_callback,cost);
-        fprintf(sidecar,"%llu,%llu,%llu,%llu,%llu,%s,%llu,%llu,%d\n",
-            (unsigned long long)b,(unsigned long long)row.scheduled,(unsigned long long)row.start,
+        fprintf(sidecar,"%llu,",(unsigned long long)b);
+        if (b>=lead) fprintf(sidecar,"%llu",(unsigned long long)(b-lead));
+        fprintf(sidecar,",%llu,%llu,%llu,%llu,%s,%llu,%llu,%d\n",
+            (unsigned long long)row.scheduled,(unsigned long long)row.start,
             (unsigned long long)row.end,(unsigned long long)row.deadline,row.selected,
             (unsigned long long)cost,(unsigned long long)lateness,int(row.end>row.deadline));
     }
@@ -157,7 +159,7 @@ int run_stamped_paced(const nam::NamModel& model, unsigned frames, unsigned lead
         << " process_cpu_drain_seconds=" << double(cpu_drain_end-cpu_loop_end)/CLOCKS_PER_SEC
         << " max_error=" << max_error << " mismatched_samples=" << mismatches
         << " full_cpu_shadow=" << (!options.cpu_only) << " gpu_timestamps_available=0"
-        << " phase_timestamps_available=callback_only\n";
+        << " phase_timestamps_available=callback_only sequence_scope=callback_index_and_delayed_input source_epoch_available=0\n";
     std::cout << "diagnostic_status=" << (passed?"passed":"failed") << '\n';
     // Correct fallback-only output is valid audio but is NOT useful GPU evidence.
     std::cout << "gpu_delivery_observed=" << (gpu>0) << '\n';

@@ -121,6 +121,11 @@ completion servicing. TimedWaitAny alone does not eliminate that inter-pump gap.
 
 The CSV keeps every callback's scheduled/start/end/deadline timestamps and
 selected output (`priming`, `cpu_baseline`, `gpu_delivered`, or `cpu_fallback`).
+`block` is the callback index. `delivered_input_sequence` is blank during
+priming and then equals `block - lead`; a selected result belongs to that older
+input, not to the input newly admitted by this callback. The public API supplies
+no source epoch, so this is a capture-local sequence mapping, not an invented
+SDK stream epoch. The matrix validator checks this relationship for every row.
 A callback deadline is the next block boundary. Start lateness and callback
 execution cost remain separate. GPU selection and fallback counters describe
 callback output, not inner completion counts. The transport's produced, missed,

@@ -3,13 +3,17 @@ import argparse,csv,hashlib,json,os,subprocess,sys,tempfile
 from pathlib import Path
 CASES=[(b,l) for b in (32,64,128) for l in (1,2,4,8)]
 def sha(p): return hashlib.sha256(Path(p).read_bytes()).hexdigest()
-def complete_sidecar(path, expected):
+def complete_sidecar(path, expected, lead):
  try:
   count=0; previous=-1
   with path.open(newline='') as stream:
    for row in csv.DictReader(stream):
     scheduled=int(row['scheduled_ns']); start=int(row['start_ns']); end=int(row['end_ns']); deadline=int(row['deadline_ns'])
     if int(row['block'])!=count or scheduled<=previous or deadline<=scheduled or end<start or row['selected'] not in ('priming','cpu_baseline','gpu_delivered','cpu_fallback'): return False
+    delivered=row['delivered_input_sequence']
+    if count<lead:
+     if delivered!='' or row['selected']!='priming': return False
+    elif delivered!=str(count-lead) or row['selected']=='priming': return False
     previous=scheduled; count+=1
   return count==expected
  except (OSError,ValueError,KeyError,TypeError): return False
@@ -63,7 +67,7 @@ def main():
    row.update({'sidecar':str(sidecar),'sidecar_sha256':sha(sidecar) if sidecar.is_file() else None})
    expected=(a.blocks if a.blocks is not None else ((a.duration_seconds or 10)*48000+b-1)//b)+l
    if not sidecar.is_file(): row['status']='missing_sidecar'
-   elif not complete_sidecar(sidecar,expected): row['status']='incomplete_sidecar'
+   elif not complete_sidecar(sidecar,expected,l): row['status']='incomplete_sidecar'
   rows.append(row)
  after=sha(exe); failed=any(r['exit_code']!=0 or r['status']!='diagnostic_status=passed' for r in rows)
  rec={'executable':str(exe),'executable_sha256_before':before,'executable_sha256_after':after,'source_commit':subprocess.check_output(['git','rev-parse','HEAD'],cwd=Path(__file__).resolve().parents[1],text=True).strip(),'model':str(model),'model_sha256':sha(model),'transport_overlay_object_sha256':a.transport_sha,'cases':rows,'case_count':len(rows),'cpu_process_time_baseline':'open','consumer':'stamped' if a.stamped else 'legacy-diagnostic','completion_policy':policy if a.stamped else None,'worker_wait_ns':a.worker_wait_ns if a.stamped else None,'paced':a.paced,'cpu_baseline':a.cpu_baseline,'duration_seconds':a.duration_seconds or (10 if a.paced and a.blocks is None else None),'input_blocks':a.blocks}
