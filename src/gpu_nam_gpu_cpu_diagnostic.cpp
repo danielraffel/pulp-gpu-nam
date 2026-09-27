@@ -211,7 +211,7 @@ int main(int argc, char** argv) {
     const auto primed_blocks = node.fallback_prime_blocks();
     std::cout << "blocks=" << blocks
               << " input_blocks=" << blocks << " measured_blocks=" << blocks
-              << " drain_blocks=" << lead_blocks
+              << " drain_blocks=0 process_cpu_scope=callback_loop_plus_worker_release"
               << " provider_available=" << (provider_available ? 1 : 0)
               << " gpu_inner_completions=" << gpu_blocks
               << " cpu_fallback=" << fallback_blocks
