@@ -74,6 +74,8 @@ bool GpuNamSharedSessionNode::prepare() {
         worker_cpu_[channel].prewarm();
         realtime_cpu_[channel].prewarm();
         gpu_output_[channel].assign(block_size_, 0.0f);
+        fallback_output_[channel].assign(block_size_, 0.0f);
+        fallback_delay_[channel].assign(block_size_, 0.0f);
 
         auto result = gpu_audio::GpuWaveNetSession::create({
             .descriptor = model_descriptor,
@@ -91,6 +93,28 @@ bool GpuNamSharedSessionNode::prepare() {
     sequence_ = 0;
     gpu_delivered_blocks_ = 0;
     return true;
+}
+
+void GpuNamSharedSessionNode::prime_fallback(
+    const audio::BufferView<const float>& input, std::uint32_t n) noexcept {
+    if (!prepared_ || n != block_size_)
+        return;
+
+    // The transport's fixed one-block PDC means the delayed slot is the
+    // substitute for a miss visible in this callback.  Copy it out before
+    // advancing the state with the current input block.
+    for (std::uint32_t channel = 0; channel < channels_; ++channel) {
+        auto& due = fallback_output_[channel];
+        auto& slot = fallback_delay_[channel];
+        std::copy_n(slot.data(), n, due.data());
+        const float* source = channel < input.num_channels()
+                                  ? input.channel_ptr(channel)
+                                  : nullptr;
+        if (source != nullptr)
+            realtime_cpu_[channel].process(source, slot.data(), n);
+        else
+            std::fill_n(slot.data(), n, 0.0f);
+    }
 }
 
 void GpuNamSharedSessionNode::drain_ready(gpu_audio::GpuWaveNetSession& session,
@@ -156,19 +180,17 @@ void GpuNamSharedSessionNode::process_block(const audio::BufferView<const float>
 }
 
 void GpuNamSharedSessionNode::process_cpu_fallback(
-    const audio::BufferView<const float>& input, audio::BufferView<float>& output,
+    const audio::BufferView<const float>& /*input*/, audio::BufferView<float>& output,
     std::uint32_t n) noexcept {
+    for (std::uint32_t channel = 0; channel < output.num_channels(); ++channel)
+        std::fill_n(output.channel_ptr(channel), n, 0.0f);
     if (!prepared_ || n != block_size_) {
-        output.clear();
         return;
     }
-    for (std::uint32_t channel = 0; channel < channels_; ++channel) {
-        const float* source = channel < input.num_channels() ? input.channel_ptr(channel) : nullptr;
-        float* destination = output.channel_ptr(channel);
-        if (source == nullptr)
-            std::fill(destination, destination + n, 0.0f);
-        else
-            realtime_cpu_[channel].process(source, destination, n);
+    const std::uint32_t count = std::min<std::uint32_t>(channels_, output.num_channels());
+    for (std::uint32_t channel = 0; channel < count; ++channel) {
+        const float* source = fallback_output_[channel].data();
+        std::copy_n(source, n, output.channel_ptr(channel));
     }
 }
 

@@ -35,6 +35,8 @@ class GpuNamSharedSessionNode final : public gpu_audio::GpuAudioNode {
     bool prepare() override;
     void process_block(const audio::BufferView<const float>& input,
                        audio::BufferView<float>& output, std::uint32_t n) override;
+    void prime_fallback(const audio::BufferView<const float>& input,
+                        std::uint32_t n) noexcept override;
     void process_cpu_fallback(const audio::BufferView<const float>& input,
                               audio::BufferView<float>& output,
                               std::uint32_t n) noexcept override;
@@ -81,6 +83,13 @@ class GpuNamSharedSessionNode final : public gpu_audio::GpuAudioNode {
     std::array<nam::NamModel, kNamChannels> worker_cpu_{};
     std::array<nam::NamModel, kNamChannels> realtime_cpu_{};
     std::array<std::vector<float>, kNamChannels> gpu_output_{};
+    // The transport reports one block of latency.  Keep a precomputed CPU
+    // result for the current miss slot while advancing the fallback model on
+    // every block, including GPU hits.  This mirrors GpuConvolver's
+    // prime_fallback/process_cpu_fallback contract and prevents a miss after
+    // GPU hits from resuming an old CPU history.
+    std::array<std::vector<float>, kNamChannels> fallback_output_{};
+    std::array<std::vector<float>, kNamChannels> fallback_delay_{};
 };
 
 } // namespace pulp::examples
