@@ -435,15 +435,13 @@ TEST_CASE("GPU NAM GPU engine reproduces the CPU engine", "[nam][gpu]") {
     const auto status = proc.gpu_status();
     const auto stats = proc.gpu_block_stats();
     const auto us = proc.gpu_block_us();
-    INFO("blocks=" << stats.first << " misses=" << stats.second
-         << " avg_us=" << us.second << " budget_us=" << status.budget_us
-         << " rt%=" << status.rt_percent);
+    INFO("worker_produced=" << stats.first << " transport_misses=" << stats.second
+         << " worker_service_us=" << us.second);
     REQUIRE(status.active);
     REQUIRE(stats.first > 0);
     REQUIRE(us.second > 0.0);
-    REQUIRE(status.blocks == stats.first);
-    REQUIRE(status.budget_us > 0.0);
-    REQUIRE(status.rt_percent > 0.0);
+    REQUIRE(status.worker_produced == stats.first);
+    REQUIRE(status.worker_service_avg_us > 0.0);
 #if GPU_NAM_HAS_GPU_AUDIO_CAPABILITY_REPORT
     // The plugin observes the public capability snapshot only after its
     // off-thread stack preparation. A generic NAM node is staged today; this

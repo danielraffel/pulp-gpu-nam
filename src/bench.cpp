@@ -55,7 +55,6 @@ struct Row {
     double cpu_rt;      // realtime ratio, CPU engine
     double gpu_us;      // median process() wall time, GPU engine (audio thread)
     double gpu_worker_us;
-    double gpu_rt_percent;
     bool gpu_active;
     std::string backend;
 };
@@ -125,8 +124,7 @@ Row bench_block(const std::string& model_path, double sr, std::size_t block) {
     row.gpu_us = bench_engine(model_path, sr, block, nblocks, 1.0f, true, &gs);
     row.gpu_active = gs.active;
     row.backend = gs.backend;
-    row.gpu_worker_us = gs.avg_us;
-    row.gpu_rt_percent = gs.rt_percent;
+    row.gpu_worker_us = gs.worker_service_avg_us;
     return row;
 }
 
@@ -149,18 +147,17 @@ int main(int argc, char** argv) {
         std::printf("\n== %s (%s) @ %.0f Hz ==\n",
                     path.c_str(), ok ? probe.arch_name() : "load failed", SR);
         if (!ok) { std::printf("   %s\n", err.c_str()); continue; }
-        std::printf("   %-6s | %-12s %-8s | %-12s %-10s %-8s %s\n",
-                    "block", "CPU us/blk", "CPU xRT", "GPU us/blk", "GPU wrk us",
-                    "GPU %RT", "backend");
+        std::printf("   %-6s | %-12s %-8s | %-12s %-12s %s\n",
+                    "block", "CPU us/blk", "CPU xRT", "GPU cb us", "Worker svc us", "backend");
         for (std::size_t b : blocks) {
             const Row row = bench_block(m, SR, b);
-            std::printf("   %-6zu | %-12.1f %-8.1f | %-12.1f %-10.1f %-8.1f %s\n",
+            std::printf("   %-6zu | %-12.1f %-8.1f | %-12.1f %-12.1f %s\n",
                         row.block, row.cpu_us, row.cpu_rt, row.gpu_us,
-                        row.gpu_worker_us, row.gpu_rt_percent,
+                        row.gpu_worker_us,
                         row.gpu_active ? row.backend.c_str() : "(cpu fallback)");
         }
     }
     std::printf("\nxRT = realtime multiple for one instance (higher is faster). "
-                "Internal gauge for this machine only.\n");
+                "Worker service time is not GPU elapsed time or deadline reliability.\n");
     return 0;
 }

@@ -73,3 +73,25 @@ Do not substitute `pulp audio render --initial-param 4=1` for this test. That
 command applies initial values after prepare; a preparation-bound Engine request
 then remains pending until the next activation. It can render correct CPU audio
 without ever exercising the requested stamped GPU engine.
+
+## UI delivery status
+
+The About line uses public callback-selection counters when the SDK exposes
+`GpuAudioTransport::delivery_snapshot()`. It shows selected GPU and CPU-fallback
+blocks. Generic worker-ring selections are labeled `Worker output`, since those
+nodes may perform CPU work or internal fallback. Older SDKs show `delivery counts
+unavailable`; worker completions are never substituted for missing evidence.
+The diagnostic CLAP export remains a separate default-OFF build option.
+
+The stack mutex protects lifetime and prepared metadata, not a coherent instant
+across independently loaded counters. Live counts are approximate; exact totals
+require stopped callbacks. Backend availability, counter values and worker time
+are not evidence of numerical correctness or deadline reliability.
+
+The former `% RT` label has been removed from the UI, screenshot telemetry and
+benchmark output. In shared mode transport timing covers a progress-reporting
+worker service call, possibly retiring multiple results. It is not GPU elapsed
+time, CPU consumption, deadline margin or equivalent to staged per-block cost.
+Diagnostic fields now name worker-produced blocks, transport misses and worker
+service wall time explicitly. Requested/prepared/effective Engine policy is
+unchanged; stamped Engine remains preparation-bound.

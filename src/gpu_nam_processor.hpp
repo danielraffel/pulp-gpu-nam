@@ -8,29 +8,26 @@
 // is re-blocked into fixed kInternalBlock chunks so the inline CPU engine and the
 // GPU engine share one re-blocking FIFO and one fixed reported latency.
 //
-// An optional, default-OFF GPU engine (the Engine knob) routes the same fixed
-// blocks through the real GPU audio runtime: a GpuNamCloudNode (one fused GPU
-// `wavenet_forward` per channel) driven by gpu_audio::GpuAudioTransport on a non-RT
-// worker. The GPU forward blocks on the device readback, so it runs only on the
-// transport worker; the audio thread calls the lock-free transport.process() and,
-// on a worker miss, the node's CpuFallback runs the exact CPU oracle. If no GPU
-// device exists the processor stays on the inline CPU engine and always works.
+// The optional GPU engine has three build-time routes. The default cloud route
+// runs blocking GPU forward/readback on a non-realtime transport worker. The
+// experimental shared-session route retains a generic worker transport. The
+// experimental stamped route selects prepared shared-buffer results on the
+// callback, with a continuously prepared CPU fallback and fixed pipeline lead.
+// Device/provider absence falls back to the inline CPU engine.
 //
-// Engine (CPU<->GPU) and the loaded model are switchable LIVE without a reload:
-// a background worker builds the requested engine stack off-thread and publishes
-// it through atomic pointers (gpu_active_ for the GPU transport, cpu_active_ for
-// the inline CPU engine) that the audio thread loads each block. The previously
-// active stack is retired and freed one rebuild later, so the audio thread never
-// holds a stack as it is freed — it never allocates or frees. Reported latency is
-// FIXED for the prepared lifetime (kInternalBlock plus the GPU transport's delay
-// when a device exists), applied to both engines so a live switch keeps the
-// host's PDC correct and dry/wet phase-aligned. See gpu_engine_active().
+// Cloud-route Engine changes can rebuild and publish a stack while playing.
+// Stamped-route Engine selection is preparation-bound: change it while inactive
+// and prepare again. Requested, prepared and effective engine remain distinct.
+// The callback never builds/frees stacks. Prepared latency includes reblocking
+// and pipeline delay and is shared by CPU/GPU paths to preserve host PDC.
+// Backend presence or worker activity alone never proves selected GPU audio.
 //
 // The native GPU front-end (input→output transfer curve + gain/mix/engine
 // controls, rendered through canvas/Skia/Dawn) is in gpu_nam_ui.hpp.
 
 #include "gpu_nam.hpp"
 #include "gpu_nam_engine.hpp"
+#include "gpu_nam_delivery_status.hpp"
 #include "nam_model.hpp"
 #include "nam_retire_list.hpp"
 #include "gpu_nam_license.hpp"
@@ -352,7 +349,8 @@ public:
         return current_stack_->backend;
     }
 
-    /// Live {GPU blocks produced, blocks missed (CPU-filled)}. UI/main-thread only.
+    /// Legacy {worker-produced blocks, transport misses}. UI/main-thread only.
+    /// These are not selected GPU output or proof of a CPU fallback delivery.
     std::pair<std::uint64_t, std::uint64_t> gpu_block_stats() const {
         std::lock_guard<std::mutex> lock(stack_mutex_);
         if (!gpu_engine_active() || !current_stack_ || !current_stack_->transport)
@@ -372,7 +370,10 @@ public:
     }
 #endif
 
-    /// Live GPU cost: {last, average} wall-clock microseconds per block.
+    /// Worker service {last, average} wall-clock microseconds. Shared mode
+    /// samples progress-reporting service calls, possibly retiring several
+    /// results. Not GPU elapsed time, CPU consumption or deadline reliability;
+    /// not equivalent to staged per-block cost. Kept for diagnostic callers.
     std::pair<double, double> gpu_block_us() const {
         std::lock_guard<std::mutex> lock(stack_mutex_);
         if (!gpu_engine_active() || !current_stack_ || !current_stack_->transport)
@@ -381,10 +382,9 @@ public:
         return {s.last_block_us, s.avg_block_us};
     }
 
-    /// One coherent snapshot of the live GPU engine for the UI status line, taken
-    /// under a SINGLE lock so the fields can't disagree across a repaint.
-    /// `budget_us` is one GPU block's real-time budget on THIS device + sample
-    /// rate; `rt_percent` is the measured average cost as a percentage of it.
+    /// The mutex protects stack lifetime and prepared metadata. Transport
+    /// counters are independent atomic observations while callbacks run; the
+    /// lock does not make them a coherent multi-counter instant.
     struct GpuStatus {
         bool active = false;
         std::string backend;
@@ -395,11 +395,10 @@ public:
         bool capability_ready = false;
         bool fallback_available = false;
         std::uint32_t prepared_lead_blocks = 0;
-        std::uint64_t blocks = 0;
-        std::uint64_t misses = 0;
-        double avg_us = 0.0;
-        double budget_us = 0.0;
-        double rt_percent = 0.0;
+        nam::GpuNamDeliveryStatus delivery;
+        std::uint64_t worker_produced = 0;
+        std::uint64_t transport_misses = 0;
+        double worker_service_avg_us = 0.0;
     };
     GpuStatus gpu_status() const {
         std::lock_guard<std::mutex> lock(stack_mutex_);
@@ -413,13 +412,10 @@ public:
         g.prepared_lead_blocks = current_stack_->prepared_lead_blocks;
         if (current_stack_->transport) {
             const auto s = current_stack_->transport->stats();
-            g.blocks = s.produced_blocks;
-            g.misses = s.miss_blocks;
-            g.avg_us = s.avg_block_us;
-        }
-        if (sample_rate_ > 0.0) {
-            g.budget_us = static_cast<double>(kInternalBlock) / sample_rate_ * 1e6;
-            if (g.budget_us > 0.0) g.rt_percent = g.avg_us / g.budget_us * 100.0;
+            g.worker_produced = s.produced_blocks;
+            g.transport_misses = s.miss_blocks;
+            g.worker_service_avg_us = s.avg_block_us;
+            g.delivery = nam::read_gpu_nam_delivery_status(*current_stack_->transport);
         }
         return g;
     }

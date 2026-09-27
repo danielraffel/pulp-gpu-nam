@@ -471,3 +471,9 @@ if(GPU_NAM_SILENT_DEVICE_PROBE)
         "${PULP_CLAP_INCLUDE_DIR}")
     # Intentionally no add_test: opening a physical device is always manual.
 endif()
+
+if(GPU_NAM_BUILD_TESTS)
+    add_executable(gpu-nam-delivery-status-test test_gpu_nam_delivery_status.cpp)
+    target_compile_features(gpu-nam-delivery-status-test PRIVATE cxx_std_20)
+    add_test(NAME gpu-nam-delivery-status COMMAND gpu-nam-delivery-status-test)
+endif()

@@ -12,7 +12,8 @@
 // Middle · Treble · Output), Noise-Gate and EQ slide switches under their knobs,
 // input/output edge meters, and Model + IR file slots. A settings gear reveals
 // this demo's GPU-specific controls (audio Engine CPU/GPU + Bypass + live GPU
-// status), keeping them off the faithful face panel. Pointer input drives real
+// selections), keeping them off the faithful face panel. In the experimental
+// stamped build Engine is preparation-bound rather than live-switchable. Pointer input drives real
 // parameters through host gestures (begin/set/finish) so edits stick and record.
 
 #include "gpu_nam_processor.hpp"
@@ -575,15 +576,10 @@ private:
         canvas.set_font("Roboto", ss(11.0f));
         canvas.fill_text("GPU NAM \xC2\xB7 Pulp GPU audio demo", sx(ax), sy(by + 22.0f));
         const auto g = proc_.gpu_status();
-        char buf[96];
-        if (g.active)
-            std::snprintf(buf, sizeof buf, "GPU %s \xC2\xB7 %.0f%% RT",
-                          g.backend.empty() ? "on" : g.backend.c_str(), g.rt_percent);
-        else
-            std::snprintf(buf, sizeof buf, "GPU idle (CPU oracle live)");
+        const auto delivery_label = gpu_nam_delivery_label(g.active, g.delivery);
         canvas.set_fill_color(g.active ? colors_.accent : colors_.text_dim);
         canvas.set_font("Roboto", ss(10.0f));
-        canvas.fill_text(buf, sx(ax), sy(by + 38.0f));
+        canvas.fill_text(delivery_label, sx(ax), sy(by + 38.0f));
 
         // Slim-info popover on top of everything, when toggled open.
         if (show_slim_info_ && settings_slim_count_ > 0) paint_slim_info_popover(canvas);
