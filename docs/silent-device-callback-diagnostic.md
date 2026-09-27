@@ -62,3 +62,16 @@ with zero GPU selections fails this gate. The CPU capture must report no GPU
 transport selections. The offline comparator rejects corruption, silence and
 unmatched device/rate/PDC metadata. It reports observed process durations without
 calling them end-to-end latency or deadline reliability.
+
+The comparator pins48kHz and1024samples of PDC rather than accepting two matching
+but incorrect reports. It rejects negative or inconsistent delivery counters,
+requires all CPU transport counters to be zero, and requires shared GPU plus
+fallback plus one priming block to equal the complete512-frame transport blocks
+captured. Reported callback count must match the raw rows. Metadata mutation
+controls verify these rejections while allowing explicitly reported partition
+differences.
+
+The xrun field comes from `AudioDevice::xrun_count`. Public API does not establish
+whether the platform overload listener registered successfully, so metadata says
+`xrun_listener_availability=unavailable`. A reported zero is not proof that no
+hardware overruns occurred.

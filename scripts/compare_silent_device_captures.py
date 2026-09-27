@@ -25,13 +25,16 @@ def load(prefix):
         values.append(pair)
     with paths[2].open() as stream:
         rows = list(csv.DictReader(stream))
+    if len(rows) != int(meta['callbacks']):
+        raise ValueError('reported callback count differs from rows')
     if not rows:
         raise ValueError('no device callbacks')
     cursor = int(rows[0]['sample_position'])
     for i, row in enumerate(rows):
         n = int(row['frames'])
         if (int(row['callback']) != i or int(row['sample_position']) != cursor
-                or not 0 < n <= 4096 or int(row['clap_status']) == 0
+                or cursor < 0 or not 0 < n <= 4096 or not 1 <= int(row['clap_status']) <= 4
+                or int(row['observed_entry_ns']) < 0
                 or int(row['observed_exit_ns']) < int(row['observed_entry_ns'])):
             raise ValueError('invalid callback row')
         cursor += n
@@ -49,11 +52,26 @@ def compare(cpu_prefix, shared_prefix):
                 'hardware_host_timestamp', 'pdc', 'frames_compared', 'lifetime', 'teardown_proven'):
         if cpu[key] != gpu[key]:
             raise ValueError('unmatched ' + key)
-    if (cpu['engine'] != 'cpu' or gpu['engine'] != 'shared' or
-            int(cpu['gpu_selected']) != 0 or int(gpu['gpu_selected']) <= 0 or
-            cpu['physical_output'] != 'silence' or cpu['input_channels'] != '0' or
-            cpu['teardown_proven'] != 'false'):
-        raise ValueError('missing CPU/GPU control or silent process-retained contract')
+    pinned = {'actual_rate': '48000', 'input_channels': '0',
+              'physical_output': 'silence', 'hardware_host_timestamp': 'unavailable',
+              'pdc': '1024', 'lifetime': 'process_retained_until_exit',
+              'teardown_proven': 'false', 'xrun_source': 'AudioDevice::xrun_count',
+              'xrun_listener_availability': 'unavailable'}
+    count_keys = ('gpu_selected', 'cpu_fallback', 'priming', 'other')
+    for meta, engine in ((cpu, 'cpu'), (gpu, 'shared')):
+        if meta['engine'] != engine or not meta['device_id']:
+            raise ValueError('missing engine or explicit device identity')
+        for key, expected in pinned.items():
+            if meta[key] != expected:
+                raise ValueError('invalid pinned contract: ' + key)
+        counts = [int(meta[key]) for key in count_keys]
+        if any(value < 0 for value in counts):
+            raise ValueError('negative delivery count')
+        if engine == 'cpu' and any(counts):
+            raise ValueError('CPU control claimed transport selections')
+        if engine == 'shared' and (counts[0] <= 0 or counts[2] != 1 or counts[3] != 0
+                                   or sum(counts) != int(meta['frames_captured']) // 512):
+            raise ValueError('invalid shared delivery accounting')
     if len(ca) != len(ga) or not ca:
         raise ValueError('unmatched capture size')
     peak = max(abs(a-b) for c, g in zip(ca, ga) for a, b in zip(c, g))

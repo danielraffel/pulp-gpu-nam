@@ -142,7 +142,7 @@ int main(int argc,char** argv) {
             <<"\nauxiliary_audio_workgroup_join=not_attempted\nlifetime=process_retained_until_exit\nteardown_proven=false\nframes_captured="<<owner->position
             <<"\nframes_compared="<<target_frames<<"\ncallbacks="<<owner->row_count<<"\npdc=1024\ngpu_selected="<<snapshot.gpu_delivered
             <<"\ncpu_fallback="<<snapshot.cpu_fallback<<"\npriming="<<snapshot.priming<<"\nother="<<snapshot.other
-            <<"\ncallback_allocations=not_measured\nxruns="<<owner->device->xrun_count()<<"\nenergy="<<energy<<'\n';
+            <<"\ncallback_allocations=not_measured\nxrun_source=AudioDevice::xrun_count\nxrun_listener_availability=unavailable\nxruns="<<owner->device->xrun_count()<<"\nenergy="<<energy<<'\n';
         rows.close();audio.close();meta.close();require(bool(rows)&&bool(audio)&&bool(meta),"output write failed");
         require(energy>1e-6,"silent captured plugin output");
         std::cout<<"silent_device_capture=passed engine="<<mode<<" gpu_selected="<<snapshot.gpu_delivered<<" cpu_fallback="<<snapshot.cpu_fallback<<" callback_teardown=unproven\n";
