@@ -30,10 +30,7 @@
 // controls, rendered through canvas/Skia/Dawn) is in gpu_nam_ui.hpp.
 
 #include "gpu_nam.hpp"
-#include "gpu_nam_cloud_node.hpp"
-#if defined(GPU_NAM_EXPERIMENTAL_SHARED_WAVENET_SESSION)
-#include "gpu_nam_shared_session_node.hpp"
-#endif
+#include "gpu_nam_engine.hpp"
 #include "nam_model.hpp"
 #include "nam_retire_list.hpp"
 #include "gpu_nam_license.hpp"
@@ -53,12 +50,6 @@
 // plists. Falls back for header-only / non-CMake builds.
 #ifndef GPU_NAM_VERSION_STRING
 #define GPU_NAM_VERSION_STRING "0.0.0-dev"
-#endif
-
-#if defined(GPU_NAM_EXPERIMENTAL_SHARED_WAVENET_SESSION)
-using GpuNamEngineNode = pulp::examples::GpuNamSharedSessionNode;
-#else
-using GpuNamEngineNode = pulp::examples::GpuNamCloudNode;
 #endif
 
 #include <pulp/format/processor.hpp>
@@ -334,7 +325,7 @@ public:
         std::lock_guard<std::mutex> lock(stack_mutex_);
         if (!gpu_engine_active() || !current_stack_ || !current_stack_->node)
             return std::string();
-        return current_stack_->node->backend();
+        return current_stack_->backend;
     }
 
     /// Live {GPU blocks produced, blocks missed (CPU-filled)}. UI/main-thread only.
@@ -380,7 +371,7 @@ public:
         GpuStatus g;
         g.active = gpu_engine_active();
         if (!g.active || !current_stack_) return g;
-        if (current_stack_->node) g.backend = current_stack_->node->backend();
+        if (current_stack_->node) g.backend = current_stack_->backend;
         g.capability_report_available = current_stack_->capability_report_available;
         g.capability_ready = current_stack_->capability_ready;
         g.fallback_available = current_stack_->fallback_available;
@@ -877,7 +868,9 @@ private:
     // node.
     struct GpuStack {
         std::unique_ptr<nam::NamModel> model;
-        std::unique_ptr<GpuNamEngineNode> node;
+        std::unique_ptr<gpu_audio::GpuAudioNode> node;
+        std::string backend;
+        nam::GpuNamPreparedProgram program;
         std::unique_ptr<gpu_audio::GpuAudioTransport> transport;
         bool capability_report_available = false;
         bool capability_ready = false;
@@ -902,7 +895,9 @@ private:
     void resolve_auto_engine() {
         int choice = 0;  // CPU
         CpuEngine* cpu = current_cpu_.get();
-        if (device_available_ && cpu) {
+        // Both shared experiments still run the full callback CPU shadow. A
+        // heavy CPU model is not evidence that this path can relieve its budget.
+        if (nam::kGpuNamAutoMayOffload && device_available_ && cpu) {
             std::vector<float> in(kInternalBlock, 0.25f), out(kInternalBlock, 0.0f);
             const auto once = [&] {
                 cpu->model[0].process(in.data(), out.data(),
@@ -1213,11 +1208,13 @@ private:
     std::unique_ptr<GpuStack> build_gpu_stack(const nam::NamModel& model) {
         auto stack = std::make_unique<GpuStack>();
         stack->model = std::make_unique<nam::NamModel>(model);
-        stack->node = std::make_unique<GpuNamEngineNode>(
-            static_cast<std::uint32_t>(kChannels),
-            static_cast<std::uint32_t>(kInternalBlock),
-            static_cast<std::uint32_t>(sample_rate_), stack->model.get());
-        if (!stack->node->prepare() || !stack->node->gpu_available()) return nullptr;
+        auto engine = nam::prepare_gpu_nam_engine(
+            stack->model.get(), static_cast<std::uint32_t>(kChannels),
+            static_cast<std::uint32_t>(kInternalBlock), static_cast<std::uint32_t>(sample_rate_));
+        if (!engine.node) return nullptr;
+        stack->node = std::move(engine.node);
+        stack->backend = std::move(engine.backend);
+        stack->program = engine.program;
 
         stack->transport = std::make_unique<gpu_audio::GpuAudioTransport>();
         gpu_audio::GpuAudioTransport::Config cfg;
@@ -1229,10 +1226,9 @@ private:
         // worker. The report is a read-only SDK contract snapshot; it does not
         // expose or imply private shared-memory provider access.
         const auto report = stack->transport->capability_report();
-        // Authenticate the node's typed preparation metadata against the
-        // transport snapshot.  This is still a staged path; the check is
-        // deliberately fail-closed and does not infer shared-memory access.
-        if (nam::validate_gpu_nam_program(stack->node->prepared_program(), report) !=
+        // Bind declared preparation to the actual transport. Shared capability
+        // still does not mean that any particular callback accepted GPU audio.
+        if (nam::bind_gpu_nam_engine_program(stack->program, report) !=
             nam::GpuNamProgramError::None)
             return nullptr;
         stack->capability_report_available = true;
