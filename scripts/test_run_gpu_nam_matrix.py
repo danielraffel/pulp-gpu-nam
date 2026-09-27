@@ -24,13 +24,13 @@ class T(unittest.TestCase):
   d,p=self.fake('echo diagnostic_status=passed\n'); out=d/'o'
   spec=importlib.util.spec_from_file_location('runner',HERE/'run_gpu_nam_matrix.py'); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
   old=m.subprocess.run
-  m.subprocess.run=lambda *a,**k: (_ for _ in ()).throw(subprocess.TimeoutExpired(a[0],1,output=b'partial',stderr=b'err'))
-  try: rc=m.main.__wrapped__() if hasattr(m.main,'__wrapped__') else None
-  except TypeError: rc=None
-  finally: m.subprocess.run=old
-  # The production runner's timeout path is exercised by a short fake in CI;
-  # ensure the implementation contains byte-safe decoding and receipt fields.
-  self.assertIn('isinstance(so,bytes)',(HERE/'run_gpu_nam_matrix.py').read_text())
+  def fake_run(cmd,*args,**kwargs):
+   if Path(cmd[0]).name == p.name: raise subprocess.TimeoutExpired(cmd,1,output=b'partial',stderr=b'err')
+   return old(cmd,*args,**kwargs)
+  m.subprocess.run=fake_run; old_argv=sys.argv; sys.argv=['runner',str(p),str(out),'--model',str(MODEL)]
+  try: rc=m.main()
+  finally: sys.argv=old_argv; m.subprocess.run=old
+  self.assertNotEqual(rc,0); rec=json.loads((out/'receipt.json').read_text()); self.assertEqual(rec['cases'][0]['exit_code'],124); self.assertIn('partialerr',(out/'matrix-32-1.log').read_text())
  def test_model_path_forwarded_and_cwd_independent(self):
   d,p=self.fake('echo "$@" >> "$FAKE_ARGS"\necho diagnostic_status=passed\n'); args=d/'args'; os.environ['FAKE_ARGS']=str(args)
   try:
