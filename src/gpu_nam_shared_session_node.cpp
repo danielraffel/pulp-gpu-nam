@@ -19,7 +19,7 @@ gpu_audio::GpuAudioNodeDescriptor GpuNamSharedSessionNode::descriptor() const {
     descriptor.output_channels = channels_;
     descriptor.block_size = block_size_;
     descriptor.sample_rate = sample_rate_;
-    descriptor.latency_blocks = 1;
+    descriptor.latency_blocks = latency_blocks_;
     descriptor.miss_policy = gpu_audio::MissPolicy::CpuFallback;
     descriptor.supports_cpu_fallback = true;
     return descriptor;
@@ -27,6 +27,7 @@ gpu_audio::GpuAudioNodeDescriptor GpuNamSharedSessionNode::descriptor() const {
 
 bool GpuNamSharedSessionNode::prepare() {
     if (model_ == nullptr || channels_ == 0 || channels_ > kNamChannels ||
+        latency_blocks_ == 0 || latency_blocks_ > 8 ||
         block_size_ == 0 || sample_rate_ == 0)
         return false;
 
@@ -85,7 +86,7 @@ bool GpuNamSharedSessionNode::prepare() {
         realtime_cpu_[channel].prewarm_block_aligned(block_size_);
         gpu_output_[channel].assign(block_size_, 0.0f);
         fallback_output_[channel].assign(block_size_, 0.0f);
-        fallback_delay_[channel].assign(block_size_, 0.0f);
+        fallback_delay_[channel].assign(static_cast<std::size_t>(latency_blocks_) * block_size_, 0.0f);
 
         auto result = gpu_audio::GpuWaveNetSession::create({
             .descriptor = model_descriptor,
@@ -128,6 +129,7 @@ bool GpuNamSharedSessionNode::prepare() {
     }
     prepared_ = true;
     sequence_ = warm_blocks;
+    fallback_delay_index_ = 0;
     gpu_delivered_blocks_ = 0;
     cpu_fallback_blocks_ = 0;
     fallback_prime_blocks_ = 0;
@@ -145,16 +147,18 @@ void GpuNamSharedSessionNode::prime_fallback(
     // advancing the state with the current input block.
     for (std::uint32_t channel = 0; channel < channels_; ++channel) {
         auto& due = fallback_output_[channel];
-        auto& slot = fallback_delay_[channel];
-        std::copy_n(slot.data(), n, due.data());
+        auto& ring = fallback_delay_[channel];
+        auto* slot = ring.data() + static_cast<std::size_t>(fallback_delay_index_) * n;
+        std::copy_n(slot, n, due.data());
         // A missing input channel is a zero signal, but it still advances the
         // stateful WaveNet history.  Skipping process() here would make the
         // next real block resume from an old timeline.
         const float* source = channel < input.num_channels() && input.num_samples() >= n
                                   ? input.channel_ptr(channel)
                                   : fallback_zero_input_.data();
-        realtime_cpu_[channel].process(source, slot.data(), n);
+        realtime_cpu_[channel].process(source, slot, n);
     }
+    fallback_delay_index_ = (fallback_delay_index_ + 1) % latency_blocks_;
 }
 
 void GpuNamSharedSessionNode::drain_ready(gpu_audio::GpuWaveNetSession& session,

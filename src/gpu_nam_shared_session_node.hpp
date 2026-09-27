@@ -25,11 +25,12 @@ namespace pulp::examples {
 class GpuNamSharedSessionNode final : public gpu_audio::GpuAudioNode {
   public:
     GpuNamSharedSessionNode(std::uint32_t channels, std::uint32_t block_size,
-                            std::uint32_t sample_rate, const nam::NamModel* model)
+                            std::uint32_t sample_rate, const nam::NamModel* model,
+                            std::uint32_t latency_blocks = 1)
         : channels_(channels),
           block_size_(block_size),
           sample_rate_(sample_rate),
-          model_(model) {}
+          model_(model), latency_blocks_(latency_blocks) {}
 
     gpu_audio::GpuAudioNodeDescriptor descriptor() const override;
     bool prepare() override;
@@ -94,6 +95,8 @@ class GpuNamSharedSessionNode final : public gpu_audio::GpuAudioNode {
     // GPU hits from resuming an old CPU history.
     std::array<std::vector<float>, kNamChannels> fallback_output_{};
     std::array<std::vector<float>, kNamChannels> fallback_delay_{};
+    std::uint32_t latency_blocks_ = 1;
+    std::uint32_t fallback_delay_index_ = 0;
     std::vector<float> fallback_zero_input_{};
 };
 
