@@ -37,6 +37,9 @@ endif()
 # test tree.
 option(GPU_NAM_BUILD_TESTS "Build GPU NAM's own test suite" ON)
 
+option(GPU_NAM_BUILD_GPU_AUDIO_CAPABILITY_PROBE
+    "Build the optional Pulp GPU-audio capability compatibility probe" ON)
+
 # Validation-only bridge for Pulp's provisional opaque shared WaveNet session.
 # This remains OFF until the corresponding Pulp API lands. Enabling it requires
 # a Pulp checkout containing GpuWaveNetSession; the committed submodule pin
@@ -110,7 +113,14 @@ else()
     # in every Pulp example/test — GPU NAM ships its own tests below).
     set(PULP_ENABLE_GPU     ON  CACHE BOOL "" FORCE)
     set(PULP_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-    set(PULP_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
+    # Exact-provider validation is implemented by Pulp's configure-time test
+    # surface. Keep the normal plugin build lean, but allow an authenticated
+    # source validation build to opt that surface back in.
+    if(PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF)
+        set(PULP_BUILD_TESTS ON CACHE BOOL "" FORCE)
+    else()
+        set(PULP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    endif()
 
     add_subdirectory(pulp)
 
@@ -134,13 +144,16 @@ if(GPU_NAM_BUILD_TESTS)
     )
     FetchContent_MakeAvailable(Catch2)
     list(APPEND CMAKE_MODULE_PATH "${catch2_SOURCE_DIR}/extras")
-    # Enable testing directly rather than via include(CTest): the Pulp submodule
-    # (add_subdirectory(pulp), above) is built with PULP_BUILD_TESTS=OFF, which
-    # leaves the cached BUILD_TESTING=OFF. The stock CTest module only calls
-    # enable_testing() when BUILD_TESTING is ON, so include(CTest) would silently
-    # register zero tests. GPU NAM gates its own suite on GPU_NAM_BUILD_TESTS.
-    enable_testing()
     include(Catch)
+endif()
+
+# Keep CTest available for the standalone capability probe and for Pulp's exact
+# provider suite. The latter is built by the vendored Pulp subdirectory when
+# PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF=ON, even if GPU-NAM's own Catch2 suite is
+# disabled for a focused validation build.
+if(GPU_NAM_BUILD_TESTS OR GPU_NAM_BUILD_GPU_AUDIO_CAPABILITY_PROBE OR
+   PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF)
+    enable_testing()
 endif()
 
 add_subdirectory(src)
