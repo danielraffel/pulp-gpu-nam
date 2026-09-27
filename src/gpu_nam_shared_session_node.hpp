@@ -90,6 +90,7 @@ class GpuNamSharedSessionNode final : public gpu_audio::GpuAudioNode {
     // GPU hits from resuming an old CPU history.
     std::array<std::vector<float>, kNamChannels> fallback_output_{};
     std::array<std::vector<float>, kNamChannels> fallback_delay_{};
+    std::vector<float> fallback_zero_input_{};
 };
 
 } // namespace pulp::examples

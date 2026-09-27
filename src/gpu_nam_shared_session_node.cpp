@@ -58,6 +58,8 @@ bool GpuNamSharedSessionNode::prepare() {
         });
     }
 
+    fallback_zero_input_.assign(block_size_, 0.0f);
+
     const gpu_audio::GpuWaveNetDescriptor model_descriptor{
         .block_size = block_size_,
         .sample_rate = sample_rate_,
@@ -107,13 +109,13 @@ void GpuNamSharedSessionNode::prime_fallback(
         auto& due = fallback_output_[channel];
         auto& slot = fallback_delay_[channel];
         std::copy_n(slot.data(), n, due.data());
+        // A missing input channel is a zero signal, but it still advances the
+        // stateful WaveNet history.  Skipping process() here would make the
+        // next real block resume from an old timeline.
         const float* source = channel < input.num_channels()
                                   ? input.channel_ptr(channel)
-                                  : nullptr;
-        if (source != nullptr)
-            realtime_cpu_[channel].process(source, slot.data(), n);
-        else
-            std::fill_n(slot.data(), n, 0.0f);
+                                  : fallback_zero_input_.data();
+        realtime_cpu_[channel].process(source, slot.data(), n);
     }
 }
 
@@ -182,11 +184,13 @@ void GpuNamSharedSessionNode::process_block(const audio::BufferView<const float>
 void GpuNamSharedSessionNode::process_cpu_fallback(
     const audio::BufferView<const float>& /*input*/, audio::BufferView<float>& output,
     std::uint32_t n) noexcept {
-    for (std::uint32_t channel = 0; channel < output.num_channels(); ++channel)
-        std::fill_n(output.channel_ptr(channel), n, 0.0f);
-    if (!prepared_ || n != block_size_) {
+    if (!prepared_ || n != block_size_ || output.num_samples() < n) {
+        output.clear();
         return;
     }
+    // Clear any excess samples too, so a larger host view cannot retain stale
+    // tail data when the transport supplies a shorter block.
+    output.clear();
     const std::uint32_t count = std::min<std::uint32_t>(channels_, output.num_channels());
     for (std::uint32_t channel = 0; channel < count; ++channel) {
         const float* source = fallback_output_[channel].data();
