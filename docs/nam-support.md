@@ -62,6 +62,16 @@ interval. It is useful for validating authenticated shared buffers, but it is no
 yet the final zero-copy callback architecture: the public session still copies
 into provider-owned slots and does not share one device across stereo sessions.
 
+The first real-model validation also exposed an expected cold-start boundary. On
+an Apple Silicon Metal backend, the first shared Dawn dispatch can exceed the
+adapter's 2 ms worker budget even when subsequent blocks are delivered much
+faster. A late first result is retired and the continuously prepared CPU output
+is kept for that block. The validation therefore checks both dispositions: the
+GPU path must deliver a real block, while a cold miss remains a correct CPU
+fallback rather than an integration failure. The test also requires an
+authentic GPU delivery after the cold-start allowance. This is evidence for prewarm or
+pipeline-lead work, not a realtime-suitability claim.
+
 Both engines report one fixed latency for the prepared lifetime, so switching
 engines live keeps the host's delay compensation correct and the dry/wet blend
 phase-aligned.
