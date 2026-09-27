@@ -78,6 +78,12 @@ int main(int argc,char** argv) {
             if(info.id==4){engine_found=true;require(!(info.flags&CLAP_PARAM_IS_AUTOMATABLE),"stamped Engine must be preparation-bound");}
         }
         require(engine_found,"Engine parameter missing");
+        require(query(nullptr)==1,"null snapshot query did not fail closed");
+        GpuNamHostProbeSnapshot malformed;
+        malformed.size=sizeof(malformed)-1;
+        require(query(&malformed)==1,"malformed snapshot size did not fail closed");
+        malformed.size=sizeof(malformed);malformed.version=2;
+        require(query(&malformed)==1,"unsupported snapshot version did not fail closed");
         // Negative control: a query must never pick the last-created instance.
         const auto* second=factory->create_plugin(factory,&host,descriptor->id);
         require(second,"second-instance control setup failed");
@@ -133,13 +139,19 @@ int main(int argc,char** argv) {
                 require(snapshot.other==0 && snapshot.priming==1,"unexpected terminal disposition or priming count");
                 require(snapshot.gpu_delivered+snapshot.cpu_fallback+snapshot.priming==blocks*frames/512,"delivery accounting incomplete");
             }
+            if(query_result==0 && engine==0)
+                require(snapshot.gpu_delivered==0 && snapshot.cpu_fallback==0 &&
+                        snapshot.priming==0 && snapshot.other==0,
+                        "CPU epoch reported transport selections");
             double energy=0,max_error=0;
             for(std::size_t i=0;i<capture.size();++i){energy+=double(capture[i])*capture[i];if(epoch)max_error=std::max(max_error,std::abs(double(capture[i])-captures[0][i]));}
             require(energy>1e-6,"silent native plugin output");
             if(epoch)require(max_error<1e-4,"native GPU/fallback audio differs from CPU reference");
             std::cout<<"epoch="<<epoch<<" engine="<<engine<<" pdc=1024 max_error="<<max_error
                      <<" delivery_query="<<query_result;
-            if(query_result==0)std::cout<<" gpu_delivered="<<snapshot.gpu_delivered;
+            if(query_result==0)std::cout<<" gpu_delivered="<<snapshot.gpu_delivered
+                <<" cpu_fallback="<<snapshot.cpu_fallback<<" priming="<<snapshot.priming
+                <<" other="<<snapshot.other;
             std::cout<<'\n';
             loaded.plugin->deactivate(loaded.plugin);loaded.active=false;
         }

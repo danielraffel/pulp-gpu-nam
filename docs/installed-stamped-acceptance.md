@@ -10,7 +10,7 @@ receipt; source-SHA equality is not itself archive authentication.
 ```sh
 SDK_PREFIX=/tmp/pulp-shared-gpu-sdk-prefix-20260927
 SDK_SHA=<owner-confirmed-40-character-source-sha>
-NAM_SOURCE=/tmp/gpu-nam-installed-delivery-20260927
+NAM_SOURCE=/tmp/gpu-nam-installed-host-controls-20260927
 NAM_BUILD=/tmp/gpu-nam-installed-sdk-full-plugin-20260927
 cmake -S "$NAM_SOURCE" -B "$NAM_BUILD" -G Ninja \
   -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 \
@@ -54,6 +54,8 @@ provider or an expected-SHA pin.
   capability, Engine=GPU, PDC, or worker-produced counts cannot prove accepted GPU
   output. The host queries only after stop_processing and before deactivate.
   Exactly one instance must exist; a second-instance control must be rejected.
+  Null, malformed-size and unsupported-version queries must also be rejected.
+  CPU epochs must have zero transport counts; all four counters are logged per epoch.
 
 The diagnostic C export `gpu_nam_host_probe_v1` exists only with the explicit
 `GPU_NAM_NATIVE_HOST_PROBE` build option, OFF by default. These builds are not for
