@@ -155,6 +155,15 @@ if(TARGET pulp::runtime)
         target_include_directories(gpu-nam-retire-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
         add_test(NAME gpu-nam-retire-test COMMAND gpu-nam-retire-test)
 
+        # Typed WaveNet preparation metadata.  This test covers the
+        # backend-neutral descriptor and CPU-fallback contract without
+        # constructing Dawn/Metal resources or claiming shared execution.
+        add_executable(gpu-nam-prepared-program-test test_gpu_nam_prepared_program.cpp)
+        target_link_libraries(gpu-nam-prepared-program-test
+            PRIVATE pulp::gpu-audio Catch2::Catch2WithMain)
+        target_include_directories(gpu-nam-prepared-program-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+        add_test(NAME gpu-nam-prepared-program-test COMMAND gpu-nam-prepared-program-test)
+
         # Output-level make-up math (Raw / Normalized / Calibrated). Pure header,
         # no pulp/GPU deps — just Catch2.
         add_executable(gpu-nam-output-cal-test test_output_calibration.cpp)
