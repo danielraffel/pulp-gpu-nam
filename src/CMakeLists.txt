@@ -182,7 +182,11 @@ if(TARGET pulp::render AND TARGET pulp::gpu-audio)
     add_compile_definitions(GPU_NAM_VERSION_STRING="${GPU_NAM_VERSION}")
 
     set(_gpu_nam_experimental_sources)
-    if(GPU_NAM_EXPERIMENTAL_SHARED_WAVENET_SESSION)
+if(GPU_NAM_EXPERIMENTAL_SHARED_WAVENET_SESSION)
+    add_executable(gpu-nam-cpu-baseline gpu_nam_cpu_baseline.cpp)
+    target_link_libraries(gpu-nam-cpu-baseline PRIVATE pulp::runtime)
+    target_include_directories(gpu-nam-cpu-baseline PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(gpu-nam-cpu-baseline PRIVATE GPU_NAM_MODEL_PATH="${CMAKE_CURRENT_SOURCE_DIR}/models/example.nam")
         list(APPEND _gpu_nam_experimental_sources gpu_nam_shared_session_node.cpp)
     endif()
 
