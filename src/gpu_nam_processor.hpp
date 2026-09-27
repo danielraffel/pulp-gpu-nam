@@ -173,7 +173,8 @@ public:
         // CPU cost once at prepare and offloads to the GPU only when the CPU can't
         // comfortably meet the block's real-time budget (see resolve_auto_engine).
         store.add_parameter({.id = kEngine, .name = "Engine", .unit = "",
-                             .range = {0.0f, 2.0f, 0.0f, 1.0f}});
+                             .range = {0.0f, 2.0f, 0.0f, 1.0f},
+                             .automatable = !nam::kGpuNamPreparationBoundEngine});
         store.add_parameter({.id = kBypass, .name = "Bypass", .unit = "",
                              .range = {0.0f, 1.0f, 0.0f, 1.0f}});
         store.add_parameter({.id = kNoiseGateThreshold, .name = "Gate", .unit = "dB",
@@ -311,6 +312,29 @@ public:
     /// requested AND a GPU device is available AND the transport is published).
     bool gpu_engine_active() const {
         return gpu_engine_active_.load(std::memory_order_acquire);
+    }
+
+    /// Stamped experiments apply backend requests only at stopped preparation.
+    /// A live edit or state restore remains visible as pending; it cannot revive
+    /// an inactive model whose causal history stopped advancing.
+    int requested_engine() const { return resolve_engine_selection(); }
+    int prepared_engine() const { return prepared_engine_.load(std::memory_order_acquire); }
+    int effective_engine() const { return gpu_engine_active() ? 1 : 0; }
+    bool engine_change_pending() const {
+        return nam::kGpuNamPreparationBoundEngine && requested_engine() != prepared_engine();
+    }
+    const char* engine_selection_status_text() const {
+        if (engine_change_pending())
+            return requested_engine() == 1
+                       ? "CPU active. GPU requested for next activation."
+                       : (gpu_engine_active()
+                              ? "GPU path active. CPU requested for next activation."
+                              : "CPU active. CPU requested for next activation.");
+        if (requested_engine() == 1 && !gpu_engine_active())
+            return "GPU unavailable; CPU active. Retry on next activation.";
+        return gpu_engine_active()
+                   ? "GPU path active. Engine changes apply on next activation."
+                   : "CPU active. Engine changes apply on next activation.";
     }
 
     /// The engine that Engine=Auto resolved to at prepare(): 0 = CPU, 1 = GPU.
@@ -663,6 +687,8 @@ public:
         // prewarmed model (needs current_cpu_ + device_available_, both ready here).
         if (state().get_value(kEngine) >= 1.5f) resolve_auto_engine();
         requested_engine_.store(resolve_engine_selection(), std::memory_order_relaxed);
+        prepared_engine_.store(requested_engine_.load(std::memory_order_relaxed),
+                               std::memory_order_release);
         if (requested_engine_.load(std::memory_order_relaxed) == 1) {
             std::lock_guard<std::mutex> lock(stack_mutex_);
             if (current_stack_) {
@@ -1269,7 +1295,10 @@ private:
             std::lock_guard<std::mutex> lock(stack_mutex_);
             current_stack_ = std::move(fresh);
         }
-        if (requested_engine_.load(std::memory_order_relaxed) == 1) {
+        const int target = nam::kGpuNamPreparationBoundEngine
+                               ? prepared_engine_.load(std::memory_order_acquire)
+                               : requested_engine_.load(std::memory_order_relaxed);
+        if (target == 1) {
             gpu_active_.store(tp, std::memory_order_seq_cst);   // reader loads this, then it retires
             gpu_engine_active_.store(true, std::memory_order_release);
         }
@@ -1555,8 +1584,10 @@ private:
                 else               build_and_publish_ir(ipath);
             }
 
-            // Engine toggle (GPU publish/unpublish; the stack stays built).
-            if (device_available_) {
+            // Stamped backend changes require stopped preparation: publishing an
+            // inactive stack here would resume stale WaveNet causal history.
+            // Default and legacy adapters retain their existing toggle behavior.
+            if (!nam::kGpuNamPreparationBoundEngine && device_available_) {
                 const int want = requested_engine_.load(std::memory_order_relaxed);
                 if (want == 1 && gpu_active_.load(std::memory_order_relaxed) == nullptr) {
                     gpu_audio::GpuAudioTransport* tp = nullptr;
@@ -1689,6 +1720,7 @@ private:
     std::thread worker_;
     std::atomic<bool> worker_run_{false};
     std::atomic<int> requested_engine_{0};
+    std::atomic<int> prepared_engine_{0};
     // Engine=Auto resolves to this (0 = CPU, 1 = GPU), decided at prepare().
     std::atomic<int> auto_resolved_engine_{0};
     std::mutex model_req_mutex_;

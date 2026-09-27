@@ -487,11 +487,16 @@ private:
         // Output-Mode and Slim rows below.
         section_label(canvas, rowL, cy, "AUDIO ENGINE");
         cy += 14.0f;
-        const bool gpu = store_.get_value(kEngine) >= 0.5f;
+        const bool gpu = nam::kGpuNamPreparationBoundEngine
+                             ? proc_.requested_engine() == 1
+                             : store_.get_value(kEngine) >= 0.5f;
         settings_engine_cpu_ = seg(canvas, rowL, cy, segW, "CPU oracle", !gpu);
         settings_engine_gpu_ = seg(canvas, rowL + segW + 14.0f, cy, segW, "GPU engine", gpu);
         cy += 34.0f;
-        help(canvas, rowL, cy, "CPU (always available) or GPU (opt-in, bit-exact vs the CPU oracle).");
+        if constexpr (nam::kGpuNamPreparationBoundEngine)
+            help(canvas, rowL, cy, proc_.engine_selection_status_text());
+        else
+            help(canvas, rowL, cy, "CPU (always available) or GPU (opt-in, bit-exact vs the CPU oracle).");
         cy += 16.0f;
 
         // Output Mode as a full-width 3-segment row so Raw / Normalized / Calibrated

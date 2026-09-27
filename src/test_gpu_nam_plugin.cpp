@@ -551,6 +551,7 @@ TEST_CASE("GPU NAM GPU engine keeps stereo channels independent on the shared de
     REQUIRE(rr > rl);     // channel 1 is not running channel 0's stream (plan-slot isolation)
 }
 
+#if !defined(GPU_NAM_EXPERIMENTAL_STAMPED_WAVENET)
 TEST_CASE("GPU NAM switches Engine CPU->GPU->CPU live at fixed latency", "[nam][gpu]") {
     constexpr std::size_t BLOCK = GpuNamProcessor::kInternalBlock;
     constexpr double SR = 48000.0;
@@ -591,6 +592,8 @@ TEST_CASE("GPU NAM switches Engine CPU->GPU->CPU live at fixed latency", "[nam][
     REQUIRE(drive(8, 0) > 1e-4);                  // CPU resumed, stays finite
     proc.release();
 }
+
+#endif
 
 TEST_CASE("GPU NAM Engine=Auto resolves once at prepare and the choice takes effect",
           "[nam][engine]") {
@@ -1680,3 +1683,98 @@ TEST_CASE("GPU NAM defaults Output Mode to Normalized and Slim to Lite (parity w
     CHECK(store.get_value(kOutputMode) == 1.0f);
     CHECK(store.get_value(kSize) == 0.0f);
 }
+
+#if defined(GPU_NAM_EXPERIMENTAL_STAMPED_WAVENET)
+TEST_CASE("GPU NAM stamped engine requests preserve active history until reprepare",
+          "[nam][gpu][stamped-selection]") {
+    constexpr std::size_t frames = GpuNamProcessor::kInternalBlock;
+    constexpr double rate = 48000.0;
+    for (const int initial : {0, 1}) {
+        for (const bool restore : {false, true}) {
+            CAPTURE(initial, restore);
+            GpuNamProcessor subject, control;
+            pulp::state::StateStore subject_state, control_state;
+            prepare_proc(subject, subject_state, rate, frames, float(initial));
+            prepare_proc(control, control_state, rate, frames, float(initial));
+            REQUIRE(subject.effective_engine() == initial);
+            REQUIRE(control.effective_engine() == initial);
+            REQUIRE_FALSE(subject_state.info(kEngine)->automatable);
+            REQUIRE_FALSE(subject.engine_change_pending());
+            const int latency = subject.latency_samples();
+            REQUIRE(control.latency_samples() == latency);
+            const int requested = 1 - initial;
+            // Restore exercises the host's listener-silent state path as well as
+            // direct edits. Neither is permission to swap an inactive history.
+            subject_state.set_value(kEngine, float(requested));
+            const auto restored_state = subject_state.serialize();
+            subject_state.set_value(kEngine, float(initial));
+            std::array<std::vector<float>, 2> input, output, reference;
+            for (unsigned ch = 0; ch < 2; ++ch) {
+                input[ch].resize(frames); output[ch].resize(frames); reference[ch].resize(frames);
+            }
+            pulp::midi::MidiBuffer mi, mo;
+            pulp::format::ProcessContext context;
+            context.sample_rate = rate; context.num_samples = frames;
+            double output_energy = 0;
+            auto process_pair = [&](GpuNamProcessor& expected, unsigned block) {
+                for (unsigned ch = 0; ch < 2; ++ch)
+                    for (unsigned i = 0; i < frames; ++i)
+                        input[ch][i] = .25f * std::sin(float(block * frames + i) * (.011f + ch * .008f));
+                const float* ip[]{input[0].data(), input[1].data()};
+                float* op[]{output[0].data(), output[1].data()};
+                float* rp[]{reference[0].data(), reference[1].data()};
+                pulp::audio::BufferView<const float> iv(ip, 2, frames);
+                pulp::audio::BufferView<float> ov(op, 2, frames), rv(rp, 2, frames);
+                subject.process(ov, iv, mi, mo, context);
+                expected.process(rv, iv, mi, mo, context);
+                double maximum = 0;
+                for (unsigned ch = 0; ch < 2; ++ch)
+                    for (unsigned i = 0; i < frames; ++i) {
+                        REQUIRE(std::isfinite(output[ch][i]));
+                        output_energy += double(output[ch][i]) * output[ch][i];
+                        maximum = std::max(maximum, std::abs(double(output[ch][i]) - reference[ch][i]));
+                    }
+                REQUIRE(maximum < 1e-4);
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            };
+            for (unsigned block = 0; block < 64; ++block) {
+                if (block == 32) {
+                    if (restore) REQUIRE(subject_state.deserialize(restored_state));
+                    else subject_state.set_value(kEngine, float(requested));
+                }
+                process_pair(control, block);
+                REQUIRE(subject.effective_engine() == initial);
+                REQUIRE(subject.prepared_engine() == initial);
+                REQUIRE(subject.latency_samples() == latency);
+                if (block >= 32) {
+                    REQUIRE(subject.requested_engine() == requested);
+                    REQUIRE(subject.engine_change_pending());
+                    REQUIRE(std::string(subject.engine_selection_status_text()).find("next activation") != std::string::npos);
+                }
+            }
+            REQUIRE(output_energy > 1e-6);
+            if (initial == 1) {
+                const auto [produced, misses] = subject.gpu_block_stats();
+                REQUIRE(produced > 0);
+                REQUIRE(misses < 63); // At least one eligible callback selected GPU output.
+            }
+            control.release(); subject.release();
+            // Compare stopped reprepare against a brand-new processor, not two
+            // equally stale instances. Both start a documented fresh warm epoch.
+            pulp::format::PrepareContext prepare;
+            prepare.sample_rate = rate; prepare.max_buffer_size = frames;
+            prepare.input_channels = 2; prepare.output_channels = 2;
+            subject.prepare(prepare);
+            GpuNamProcessor fresh;
+            pulp::state::StateStore fresh_state;
+            prepare_proc(fresh, fresh_state, rate, frames, float(requested));
+            REQUIRE(subject.prepared_engine() == requested);
+            REQUIRE(subject.effective_engine() == requested);
+            REQUIRE_FALSE(subject.engine_change_pending());
+            REQUIRE(subject.latency_samples() == latency);
+            for (unsigned block = 0; block < 12; ++block) process_pair(fresh, block + 1000);
+            fresh.release(); subject.release();
+        }
+    }
+}
+#endif

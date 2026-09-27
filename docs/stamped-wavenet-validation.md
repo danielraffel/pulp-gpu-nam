@@ -32,3 +32,32 @@ model replacement, native host lifecycle, and packaging remain open.
 Initial source compilation used the new node header with the existing development
 SDK include dependencies. Both consumer translation units passed syntax checking.
 This is not link, runtime, or authenticated installed-SDK proof.
+
+## Backend changes in the experimental plugin
+
+The stamped plugin applies Engine selection when the host prepares a stopped
+plugin. CPU and GPU model histories stop advancing when their respective engine
+is inactive, so resuming an old engine during playback would use stale state.
+A live Engine edit or state restore therefore changes the requested backend, not
+the active backend. The settings panel shows the active path and the pending
+request, with "next activation" text. Reactivate the plugin through the host to
+apply it. Engine is not advertised as automatable in this experimental build.
+
+A stopped reprepare starts a freshly warmed history with the requested backend.
+The one-block GPU lead stays fixed during an activation. Initial CPU/Auto
+preparation still probes and warms the GPU stack, preserving the existing device
+availability and fixed-PDC contract; avoiding that setup would require a separate
+latency-policy change. Auto stays on CPU because this experiment retains the full
+CPU shadow. Explicit GPU selection remains available.
+
+Model reload remains an explicit new-model/history transition. It uses the
+backend selected for the current preparation and does not apply a pending Engine
+request as a side effect. It is not a sample-continuous handoff between inactive
+models. Default and legacy plugin builds retain their previous Engine behavior.
+
+The `stamped-selection` test compares independent stereo samples against an
+uninterrupted control before and after live requests in both directions,
+including listener-silent state restoration. It also compares stopped reprepare
+against a fresh instance, verifies non-automatable metadata and pending UI text,
+and keeps PDC constant. These source-linked checks do not prove installed-SDK or
+DAW behavior by themselves.

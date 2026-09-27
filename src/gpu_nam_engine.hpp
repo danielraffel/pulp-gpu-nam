@@ -27,6 +27,8 @@ inline constexpr auto kGpuNamEngineRoute = GpuNamEngineRoute::SharedSession;
 #else
 inline constexpr auto kGpuNamEngineRoute = GpuNamEngineRoute::Cloud;
 #endif
+inline constexpr bool kGpuNamPreparationBoundEngine =
+    kGpuNamEngineRoute == GpuNamEngineRoute::Stamped;
 inline constexpr bool kGpuNamAutoMayOffload =
     kGpuNamEngineRoute == GpuNamEngineRoute::Cloud;
 
