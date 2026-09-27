@@ -35,12 +35,14 @@ bool close_enough(float actual, float expected) {
 
 int main(int argc, char** argv) {
     std::uint32_t block_size = 32, lead_blocks = 1, blocks = 96;
+    std::string model_path = GPU_NAM_MODEL_PATH;
     for (int i = 1; i < argc; ++i) {
         std::string arg(argv[i]);
         auto parse = [&](const char* prefix, std::uint32_t& out) {
             if (arg.rfind(prefix, 0) == 0) { try { out = static_cast<std::uint32_t>(std::stoul(arg.substr(std::strlen(prefix)))); } catch (...) { out = 0; } return true; } return false;
         };
         parse("--block-size=", block_size) || parse("--lead-blocks=", lead_blocks);
+        if (arg.rfind("--model-path=", 0) == 0) model_path = arg.substr(std::strlen("--model-path="));
     }
     if ((block_size != 32 && block_size != 64 && block_size != 128) ||
         (lead_blocks != 1 && lead_blocks != 2 && lead_blocks != 4 && lead_blocks != 8)) {
@@ -48,7 +50,7 @@ int main(int argc, char** argv) {
     }
     pulp::examples::nam::NamModel model;
     std::string error;
-    if (!pulp::examples::nam::load_nam(GPU_NAM_MODEL_PATH, model, &error)) {
+    if (!pulp::examples::nam::load_nam(model_path, model, &error)) {
         std::cerr << "load_error=" << error << '\n';
         return 1;
     }
