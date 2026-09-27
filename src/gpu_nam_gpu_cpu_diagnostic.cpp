@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <ctime>
 #include <cstring>
 #include <iostream>
 #include <limits>
@@ -34,7 +35,7 @@ bool close_enough(float actual, float expected) {
 } // namespace
 
 int main(int argc, char** argv) {
-    std::uint32_t block_size = 32, lead_blocks = 1, blocks = 96;
+    std::uint32_t block_size = 32, lead_blocks = 1, blocks = 96; bool inject_error = false;
     std::string model_path = GPU_NAM_MODEL_PATH;
     for (int i = 1; i < argc; ++i) {
         std::string arg(argv[i]);
@@ -42,6 +43,7 @@ int main(int argc, char** argv) {
             if (arg.rfind(prefix, 0) == 0) { try { out = static_cast<std::uint32_t>(std::stoul(arg.substr(std::strlen(prefix)))); } catch (...) { out = 0; } return true; } return false;
         };
         parse("--block-size=", block_size) || parse("--lead-blocks=", lead_blocks);
+        if (arg == "--inject-direct-output-error") inject_error = true;
         if (arg.rfind("--model-path=", 0) == 0) model_path = arg.substr(std::strlen("--model-path="));
     }
     if ((block_size != 32 && block_size != 64 && block_size != 128) ||
@@ -123,6 +125,7 @@ int main(int argc, char** argv) {
     for (std::uint32_t block = 0; block < blocks; ++block) {
         direct_input_ptr[0] = inputs[block].data();
         direct_node.process_block(direct_input, direct_view, block_size);
+        if (inject_error && block == 0) direct_output[0] += 1.0f;
         bool block_mismatch = false;
         for (std::uint32_t i = 0; i < block_size; ++i)
             if (!close_enough(direct_output[i], reference[block][i])) {
@@ -150,6 +153,7 @@ int main(int argc, char** argv) {
     pulp::audio::BufferView<const float> input_view(input_ptr, 1, block_size);
     pulp::audio::BufferView<float> output_view(output_ptr, 1, block_size);
     std::uint64_t callback_total_ns = 0;
+    const auto process_cpu_start = std::clock();
     std::uint64_t callback_max_ns = 0;
     std::uint64_t late_total_ns = 0;
     std::uint32_t parity_failures = 0;
@@ -200,12 +204,16 @@ int main(int argc, char** argv) {
 
     const auto stats_before_release = transport.stats();
     transport.release();
+    const auto process_cpu_end = std::clock();
+    if (process_cpu_start == std::clock_t(-1) || process_cpu_end == std::clock_t(-1) || process_cpu_end < process_cpu_start) return 4;
     const auto gpu_blocks = node.gpu_delivered_blocks();
     const auto fallback_blocks = node.cpu_fallback_blocks();
     const auto primed_blocks = node.fallback_prime_blocks();
     std::cout << "blocks=" << blocks
+              << " input_blocks=" << blocks << " measured_blocks=" << blocks
+              << " drain_blocks=0 process_cpu_scope=callback_loop_plus_worker_release"
               << " provider_available=" << (provider_available ? 1 : 0)
-              << " gpu_delivered=" << gpu_blocks
+              << " gpu_inner_completions=" << gpu_blocks
               << " cpu_fallback=" << fallback_blocks
               << " fallback_primed=" << primed_blocks
               << " produced=" << stats_before_release.produced_blocks
@@ -214,14 +222,17 @@ int main(int argc, char** argv) {
               << " parity_failures=" << parity_failures
               << " mismatch_blocks=" << mismatch_blocks
               << " max_error=" << max_error
-              << " fallback_cpu_total_ns=" << fallback_cpu_ns
+              << " fallback_cpu_elapsed_ns=" << fallback_cpu_ns
+              << " process_cpu_ticks=" << (process_cpu_end - process_cpu_start)
+              << " process_cpu_seconds=" << (double(process_cpu_end - process_cpu_start) / CLOCKS_PER_SEC)
+              << " process_cpu_ticks_per_second=" << CLOCKS_PER_SEC
               << " callback_total_ns=" << callback_total_ns
               << " callback_max_ns=" << callback_max_ns
               << " callback_late_total_ns=" << late_total_ns
               << " worker_avg_us=" << stats_before_release.avg_block_us
               << '\n';
 
-    if (gpu_blocks == 0 || parity_failures != 0 || primed_blocks != blocks) {
+    if (gpu_blocks == 0 || direct_failures != 0 || parity_failures != 0 || primed_blocks != blocks) {
         std::cout << "diagnostic_status=failed\n";
         return 3;
     }
