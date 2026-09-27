@@ -361,6 +361,17 @@ public:
         return {s.produced_blocks, s.miss_blocks};
     }
 
+#if defined(GPU_NAM_NATIVE_HOST_PROBE) && GPU_NAM_NATIVE_HOST_PROBE
+    /// Diagnostic host query only after stop_processing, before deactivate.
+    /// Counts callback selections, never worker-produced results.
+    gpu_audio::GpuAudioTransport::DeliverySnapshot gpu_delivery_snapshot() const {
+        std::lock_guard<std::mutex> lock(stack_mutex_);
+        if (!gpu_engine_active() || !current_stack_ || !current_stack_->transport)
+            return {};
+        return current_stack_->transport->delivery_snapshot();
+    }
+#endif
+
     /// Live GPU cost: {last, average} wall-clock microseconds per block.
     std::pair<double, double> gpu_block_us() const {
         std::lock_guard<std::mutex> lock(stack_mutex_);

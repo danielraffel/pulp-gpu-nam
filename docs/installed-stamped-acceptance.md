@@ -10,7 +10,7 @@ receipt; source-SHA equality is not itself archive authentication.
 ```sh
 SDK_PREFIX=/tmp/pulp-shared-gpu-sdk-prefix-20260927
 SDK_SHA=<owner-confirmed-40-character-source-sha>
-NAM_SOURCE=/tmp/gpu-nam-installed-stamped-20260927
+NAM_SOURCE=/tmp/gpu-nam-installed-delivery-20260927
 NAM_BUILD=/tmp/gpu-nam-installed-sdk-full-plugin-20260927
 cmake -S "$NAM_SOURCE" -B "$NAM_BUILD" -G Ninja \
   -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 \
@@ -60,10 +60,12 @@ The diagnostic C export `gpu_nam_host_probe_v1` exists only with the explicit
 distribution. Normal CLAP builds export no probe. This is a consumer test ABI, not
 an extension to the public SDK or CLAP standard.
 
-Until the SDK's supported delivery snapshot is wired into this probe, it returns
-code2 and the host exits78 with acceptance explicitly incomplete. It never
-converts absence into zero GPU work or a passing hardware test. The private P4
-trial observer is deliberately not used as an installed public contract.
+The probe reads the SDK's public `GpuAudioTransport::delivery_snapshot()` after
+processing stops. Only `gpu_blocks` establishes accepted GPU delivery. Generic
+worker output, silence, passthrough and invalid calls are grouped as unexpected
+outcomes; priming and CPU fallback remain separate. A CPU engine epoch returns
+zero transport counts. The host requires positive GPU delivery in both GPU epochs
+and accounts for every internal block. The private P4 trial observer is not used.
 
 Do not substitute `pulp audio render --initial-param 4=1` for this test. That
 command applies initial values after prepare; a preparation-bound Engine request

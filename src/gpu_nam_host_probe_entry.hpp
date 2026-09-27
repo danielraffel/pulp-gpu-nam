@@ -25,7 +25,11 @@ int gpu_nam_host_probe_v1(GpuNamHostProbeSnapshot* out) {
     out->requested_engine=processor->requested_engine();
     out->prepared_engine=processor->prepared_engine();
     out->latency_samples=processor->latency_samples();
-    // Deliberately fail until the installed SDK's public delivery snapshot is
-    // wired here. Worker produced counts are not accepted GPU outcomes.
-    return 2;
+    const auto delivery=processor->gpu_delivery_snapshot();
+    out->gpu_delivered=delivery.gpu_blocks;
+    out->cpu_fallback=delivery.cpu_fallback_blocks;
+    out->priming=delivery.priming_blocks;
+    out->other=delivery.worker_output_blocks+delivery.silence_blocks+
+               delivery.passthrough_blocks+delivery.invalid_blocks;
+    return 0;
 }
