@@ -342,6 +342,19 @@ if(TARGET pulp::render AND TARGET pulp::gpu-audio)
                 GPU_NAM_MODEL_PATH="${CMAKE_CURRENT_SOURCE_DIR}/models/example.nam")
             add_test(NAME gpu-nam-shared-session-adapter-test
                      COMMAND gpu-nam-shared-session-adapter-test)
+
+            # Short matched CPU/shared-GPU correctness and cadence diagnostic.
+            # This reports delivery/fallback counts and callback CPU costs; it
+            # is intentionally not a benchmark or a realtime claim.
+            add_executable(gpu-nam-gpu-cpu-diagnostic
+                           gpu_nam_gpu_cpu_diagnostic.cpp
+                           gpu_nam_shared_session_node.cpp)
+            target_link_libraries(gpu-nam-gpu-cpu-diagnostic PRIVATE
+                pulp::gpu-audio pulp::runtime)
+            target_include_directories(gpu-nam-gpu-cpu-diagnostic PRIVATE
+                ${CMAKE_CURRENT_SOURCE_DIR})
+            target_compile_definitions(gpu-nam-gpu-cpu-diagnostic PRIVATE
+                GPU_NAM_MODEL_PATH="${CMAKE_CURRENT_SOURCE_DIR}/models/example.nam")
         endif()
 
         # Editor tests: faithful UI renders non-blank + composited (Skia), and

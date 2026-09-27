@@ -79,7 +79,7 @@ TEST_CASE("experimental shared WaveNet fallback stays history aligned across hit
     // Independent CPU oracle.  The first fallback slot corresponds to the
     // transport's one-block PDC and is therefore silence.
     pulp::examples::nam::NamModel oracle = model;
-    oracle.prewarm();
+    oracle.prewarm_block_aligned(32);
     std::vector<float> input(32);
     std::vector<float> expected_current(32);
     std::vector<float> expected_due(32, 0.0f);
@@ -159,7 +159,7 @@ TEST_CASE("experimental shared WaveNet fallback advances missing channels as sil
     REQUIRE(node.prepare());
 
     pulp::examples::nam::NamModel oracle = model;
-    oracle.prewarm();
+    oracle.prewarm_block_aligned(32);
     std::vector<float> signal(32, 0.0f);
     std::vector<float> expected(32, 0.0f);
     std::vector<float> due(32, 0.0f);
@@ -206,7 +206,7 @@ TEST_CASE("experimental shared WaveNet fallback is exercised through transport m
     REQUIRE(transport.latency_samples() == 32);
 
     pulp::examples::nam::NamModel oracle = model;
-    oracle.prewarm();
+    oracle.prewarm_block_aligned(32);
     std::vector<float> input(32, 0.0f), expected(32), due(32, 0.0f), output(32);
     const float* input_channels[] = {input.data()};
     float* output_channels[] = {output.data()};
