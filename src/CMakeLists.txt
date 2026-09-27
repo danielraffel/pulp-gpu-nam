@@ -199,7 +199,7 @@ if(TARGET pulp::render AND TARGET pulp::gpu-audio)
             GPU_NAM_MODEL_PATH="${CMAKE_CURRENT_SOURCE_DIR}/models/example.nam")
         if(GPU_NAM_BUILD_TESTS)
             foreach(_lead 1 2 4 8)
-                foreach(_frames 32 64 128)
+                foreach(_frames 32 64 128 512)
                     add_test(NAME gpu-nam-stamped-${_frames}-lead-${_lead}
                         COMMAND gpu-nam-stamped-validation ${_lead} ${_frames})
                     set_tests_properties(gpu-nam-stamped-${_frames}-lead-${_lead} PROPERTIES

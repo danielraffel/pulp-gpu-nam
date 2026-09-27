@@ -10,6 +10,9 @@
 #include <thread>
 
 int main(int argc, char** argv) {
+    const bool inject_output_error = argc > 1 &&
+        std::string(argv[argc - 1]) == "--inject-output-error";
+    if (inject_output_error) --argc;
     unsigned lead = 2;
     unsigned frames = 32;
     if (argc > 4) return 64;
@@ -23,7 +26,7 @@ int main(int argc, char** argv) {
         const std::string arg = argv[2];
         const auto result = std::from_chars(arg.data(), arg.data() + arg.size(), frames);
         if (result.ec != std::errc{} || result.ptr != arg.data() + arg.size() ||
-            (frames != 32 && frames != 64 && frames != 128)) return 64;
+            (frames != 32 && frames != 64 && frames != 128 && frames != 512)) return 64;
     }
     using namespace pulp;
     constexpr unsigned channels = 2, blocks = 48;
@@ -65,6 +68,7 @@ int main(int argc, char** argv) {
         const auto reads_before = node->fallback_reads();
         transport.process(in, out, frames);
         if (block >= lead && node->fallback_reads() == reads_before) ++gpu_callbacks;
+        if (inject_output_error && block == lead) output[0][0] += .25f;
         for (unsigned ch = 0; ch < channels; ++ch) for (unsigned i = 0; i < frames; ++i) {
             const float expected = block < lead ? 0.f :
                 history[((block - lead) * channels + ch) * frames + i];

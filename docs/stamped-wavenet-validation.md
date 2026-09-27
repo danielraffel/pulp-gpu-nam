@@ -12,7 +12,7 @@ so removing the worker duplicate is not a claim of CPU savings over CPU-only NAM
 
 Build target `gpu-nam-stamped-validation`, then run CTest matching
 `gpu-nam-stamped-`. Each case checks stereo, block-aligned model prewarm,
-32/64/128-frame blocks, fixed 1/2/4/8-block delay, exactly one callback CPU-model invocation per channel
+32/64/128/512-frame blocks, fixed 1/2/4/8-block delay, exactly one callback CPU-model invocation per channel
 per block, and parity after worker servicing stops. It requires at least one
 post-priming callback without CPU fallback and correct nonzero output. Worker
 production counts are reported separately from callback selection. Failed
@@ -21,6 +21,9 @@ preparation is a failure with an unclassified cause, not a hardware skip.
 The executable accepts `[lead [frames [model_path]]]` so the same test can use
 the standard WaveNet model as well as the bundled tiny model. Invalid arguments
 fail before creating a provider.
+Append `--inject-output-error` to alter an actual delivered sample. The oracle
+must report exit 7 and a residual near 0.25. This is a failure-detector control,
+not a passing GPU case. The 512-frame case matches the plugin's internal quantum.
 
 The synthetic worker receives 10 ms between blocks. This checks correctness and
 selection, not realtime reliability. Installed-SDK execution, paced performance,
