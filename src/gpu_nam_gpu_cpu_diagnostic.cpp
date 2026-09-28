@@ -1,4 +1,5 @@
 #include "gpu_nam_shared_session_node.hpp"
+#include "gpu_nam_gpu_cpu_diagnostic_options.hpp"
 
 #include <pulp/gpu_audio/gpu_audio_transport.hpp>
 
@@ -35,7 +36,9 @@ bool close_enough(float actual, float expected) {
 } // namespace
 
 int main(int argc, char** argv) {
-    std::uint32_t block_size = 32, lead_blocks = 1, blocks = 96; bool inject_error = false;
+    std::uint32_t block_size = 32, lead_blocks = 1;
+    std::uint32_t blocks = pulp::examples::nam::kDiagnosticDefaultBlocks;
+    bool inject_error = false;
     std::string model_path = GPU_NAM_MODEL_PATH;
     for (int i = 1; i < argc; ++i) {
         std::string arg(argv[i]);
@@ -43,6 +46,11 @@ int main(int argc, char** argv) {
             if (arg.rfind(prefix, 0) == 0) { try { out = static_cast<std::uint32_t>(std::stoul(arg.substr(std::strlen(prefix)))); } catch (...) { out = 0; } return true; } return false;
         };
         parse("--block-size=", block_size) || parse("--lead-blocks=", lead_blocks);
+        if (arg.rfind("--blocks=", 0) == 0
+            && !pulp::examples::nam::parse_diagnostic_blocks(arg.substr(9), blocks)) {
+            std::cerr << "unsupported blocks\n";
+            return 2;
+        }
         if (arg == "--inject-direct-output-error") inject_error = true;
         if (arg.rfind("--model-path=", 0) == 0) model_path = arg.substr(std::strlen("--model-path="));
     }
