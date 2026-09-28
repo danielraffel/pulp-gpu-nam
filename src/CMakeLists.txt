@@ -36,6 +36,17 @@ if(_gpu_nam_arch_defs)
     add_compile_definitions(${_gpu_nam_arch_defs})
 endif()
 
+if(TARGET Catch2::Catch2WithMain)
+    add_executable(gpu-nam-gpu-cpu-diagnostic-options-test
+        test_gpu_nam_gpu_cpu_diagnostic_options.cpp)
+    target_link_libraries(gpu-nam-gpu-cpu-diagnostic-options-test
+        PRIVATE Catch2::Catch2WithMain)
+    target_include_directories(gpu-nam-gpu-cpu-diagnostic-options-test
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    add_test(NAME gpu-nam-gpu-cpu-diagnostic-options
+        COMMAND gpu-nam-gpu-cpu-diagnostic-options-test)
+endif()
+
 # Optional licensing gate (default OFF) — a reference for paid plugins. The shipped
 # MIT demo leaves it OFF, so nothing is restricted. Turn it ON and supply a public
 # key to gate the opt-in GPU acceleration behind a valid license (the free tier
