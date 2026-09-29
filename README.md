@@ -78,6 +78,11 @@ git clone https://github.com/danielraffel/pulp-gpu-nam.git
 cd pulp-gpu-nam
 git submodule update --init --recursive
 
+# Already have a checkout? Make extra working copies with
+#   scripts/new-worktree.sh <name> [<ref>] [-b <branch>]
+# instead of cloning again: it reuses the Pulp objects already on this machine,
+# keeps GitHub as the submodule origin, and refuses /tmp.
+
 # 2. (Optional) Fetch the VST3 + AU SDKs. CLAP and the Standalone app build
 #    without any external SDK; run this only if you want the VST3 and/or AU
 #    formats. They're developer-supplied and not vendored here.
