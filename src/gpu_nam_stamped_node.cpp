@@ -3,6 +3,9 @@
 #include <limits>
 
 namespace pulp::examples {
+namespace {
+constexpr std::uint32_t kStampedPipelineCapacity = 16;
+}
 std::unique_ptr<GpuNamStampedNode> GpuNamStampedNode::create(
     const nam::NamModel& model, std::uint32_t channels,
     std::uint32_t frames, std::uint32_t sample_rate, std::uint32_t lead,
@@ -39,14 +42,16 @@ std::unique_ptr<GpuNamStampedNode> GpuNamStampedNode::create(
         .weight_count = model.weights_size()};
     config.session.weights = {model.weights_data(), model.weights_size()};
     config.session.completion_policy = completion.policy;
-    config.session.slots = 16; // experiment: match ring capacity while measuring input saturation
+    // Keep provider capacity coupled to the transport ring. Two slots can saturate
+    // before a 32-frame callback period when completion observation is slower.
+    config.session.slots = kStampedPipelineCapacity;
     // The relative worker budget is shared across channels for each pump.
     // A zero worker budget never calls the waiting service path.
     config.completion_service_wait_ns = completion.worker_wait_ns;
     config.session.completion_wait_ns = completion.worker_wait_ns;
     config.channels = channels;
     config.lead_blocks = lead;
-    config.capacity = 16;
+    config.capacity = kStampedPipelineCapacity;
     config.prewarm_blocks = static_cast<std::uint32_t>(prewarm);
     config.miss_policy = gpu_audio::MissPolicy::CpuFallback;
     config.supports_cpu_fallback = true;
