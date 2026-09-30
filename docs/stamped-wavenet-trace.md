@@ -15,7 +15,10 @@ This option is deliberately separate from ordinary performance runs. It calls
 timing, and stride-one success records. The SDK then emits the canonical Pulp
 Perfetto records, including the shared stream identity, admission, terminal GPU
 outcome, audio delivery, fallback reason, and lifecycle counters. GPU-NAM does
-not define a second trace schema.
+not define a second trace schema. Because this executable is a standalone
+consumer rather than a plugin host, it also starts and stops the process-global
+Pulp tracing session around the paced run. Plugin hosts keep their existing
+adapter-owned session lifecycle.
 
 The executable must be linked against a Pulp SDK built with tracing enabled
 (`PULP_TRACING=ON`, exporting `Pulp::tracing`). The released v0.881.2 SDK used
