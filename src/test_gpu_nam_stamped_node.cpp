@@ -1,6 +1,7 @@
 #include "gpu_nam_stamped_node.hpp"
 #include "gpu_nam_stamped_paced.hpp"
 #include <pulp/gpu_audio/gpu_audio_transport.hpp>
+#include <pulp/runtime/trace_session.hpp>
 #include <algorithm>
 #include <array>
 #include <charconv>
@@ -50,7 +51,15 @@ int main(int argc, char** argv) {
     examples::nam::NamModel model;
     std::string error;
     if (!examples::nam::load_nam(positional.size() == 3 ? std::string(positional[2]) : GPU_NAM_MODEL_PATH, model, &error)) return 1;
-    if (paced.enabled) return examples::run_stamped_paced(model, frames, lead, completion, paced);
+    if (paced.enabled) {
+        // Plugin/host adapters own this lifecycle. The standalone validator
+        // must start and stop it explicitly so --trace flushes a capture.
+        const bool trace_started = paced.trace && pulp::runtime::Tracing::start();
+        if (paced.trace && !trace_started) return 8;
+        const int result = examples::run_stamped_paced(model, frames, lead, completion, paced);
+        if (paced.trace && !pulp::runtime::Tracing::stop().ok) return 8;
+        return result;
+    }
     if (examples::GpuNamStampedNode::create(model, 3, frames, 48000, lead) ||
         examples::GpuNamStampedNode::create(model, channels, frames, 48000, 0)) return 2;
     auto node = examples::GpuNamStampedNode::create(model, channels, frames, 48000, lead, completion);
