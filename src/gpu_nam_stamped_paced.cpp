@@ -64,7 +64,11 @@ int run_stamped_paced(const nam::NamModel& model, unsigned frames, unsigned lead
         std::cout << "staged_backend=" << staged->backend() << " staged_device_count=1\n";
     } else {
         node = GpuNamStampedNode::create(model, channels, frames, 48000, lead, completion);
-        if (!node || !node->prepare() ||
+        if (!node || (options.trace && !node->configure_trace({
+                         .enabled = true,
+                         .capture_admissions = true,
+                         .capture_callback_timing = true,
+                         .success_stride = 1})) || !node->prepare() ||
             !transport.prepare(node.get(), {.ring_blocks=16, .run_worker_thread=!options.force_fallback, .wake_on_write=true})) {
             std::cerr << "shared_prepare_failed=1 cause=unclassified\n"; return 8;
         }
@@ -179,6 +183,7 @@ int run_stamped_paced(const nam::NamModel& model, unsigned frames, unsigned lead
         << " input_blocks=" << inputs_count << " drain_blocks=" << lead << " measured_blocks=" << blocks
         << " completion_policy=" << (options.staged_gpu ? "legacy_blocking_readback" : completion_policy_name(completion.policy))
         << " worker_wait_ns=" << completion.worker_wait_ns
+        << " trace_enabled=" << options.trace
         << " wake_on_write=" << (!options.cpu_only && !options.force_fallback)
         << " worker_poll_interval_us=" << (options.cpu_only ? 0 : std::clamp(frames * 1'000'000u / 48000u / 4u, 50u, 2000u))
         << " forced_fallback=" << options.force_fallback << " failed_gpu_forwards=" << failed_forwards

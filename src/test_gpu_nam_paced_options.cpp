@@ -20,6 +20,7 @@ int main() {
         if (!check(!invalid.parse(arg))) return 4;
     }
     if (!check(o.parse("--blocks=1000000")&&o.valid(32,2)&&!o.valid(128,2))) return 5;
+    if (!check(o.parse("--trace") && o.trace)) return 5;
     if (!check(o.parse("--duration-seconds=10")&&!o.valid(32,2))) return 6;
     for (auto frames : {32u,64u,128u,512u}) {
         if (!check(paced_offset_ns(48000,frames)==std::uint64_t(frames)*1'000'000'000)) return 7;
