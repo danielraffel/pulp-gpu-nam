@@ -184,6 +184,24 @@ if(TARGET pulp::runtime)
     endif()
 endif()
 
+# The shadow worker is a CPU-only readiness experiment. Keep it outside the
+# GPU plugin guard so its ring/ordering test can run against a runtime-only SDK.
+if(GPU_NAM_EXPERIMENTAL_CPU_SHADOW_WORKER AND TARGET pulp::runtime)
+    add_executable(gpu-nam-cpu-shadow-worker
+        test_gpu_nam_cpu_shadow_worker.cpp)
+    target_link_libraries(gpu-nam-cpu-shadow-worker PRIVATE pulp::runtime)
+    target_include_directories(gpu-nam-cpu-shadow-worker
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(gpu-nam-cpu-shadow-worker PRIVATE
+        GPU_NAM_MODEL_PATH="${CMAKE_CURRENT_SOURCE_DIR}/models/example.nam")
+    if(GPU_NAM_BUILD_TESTS)
+        add_test(NAME gpu-nam-cpu-shadow-worker
+            COMMAND gpu-nam-cpu-shadow-worker)
+        set_tests_properties(gpu-nam-cpu-shadow-worker PROPERTIES
+            TIMEOUT 30 RESOURCE_LOCK pulp_gpu)
+    endif()
+endif()
+
 # ── GPU NAM plugin (VST3, AU v2, CLAP, Standalone) ──────────────────────────
 # A Neural Amp Modeler player: loads an open-source .nam WaveNet capture and runs
 # it through the inline CPU oracle (default) or the opt-in GPU audio runtime
@@ -234,7 +252,6 @@ if(TARGET pulp::render AND TARGET pulp::gpu-audio)
             GPU_NAM_MODEL_PATH="${CMAKE_CURRENT_SOURCE_DIR}/models/example.nam")
         list(APPEND _gpu_nam_experimental_sources gpu_nam_shared_session_node.cpp)
     endif()
-
     set(_gpu_nam_plugin_sources gpu_nam_view.cpp)
     if(GPU_NAM_EXPERIMENTAL_STAMPED_WAVENET)
         list(APPEND _gpu_nam_plugin_sources gpu_nam_stamped_node.cpp)
