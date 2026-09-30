@@ -4,6 +4,11 @@ GPU NAM builds against the Pulp SDK vendored at `./pulp`. The submodule is pinne
 to a specific Pulp commit so a clone always builds against a known framework
 version.
 
+The current pin is Pulp SDK v0.881.2, source commit
+`167a475d3ad6c777451ca8b4a45a1b981052fba2`. The matching Darwin arm64 SDK
+artifact has SHA-256
+`77cb4155f6f55bba88b59851ab9420e7d359af6ae7d7f29d99530100b6ca68b4`.
+
 ## Updating the pin
 
 ```bash
@@ -20,15 +25,14 @@ primitive (`pulp::render::GpuCompute::prepare_wavenet` / `wavenet_forward`). The
 plugin's GPU engine will not compile against an older Pulp that still exposes the
 pre-generalization `prepare_nam` / `nam_forward` names.
 
-## Provisional shared-session adapter
+## Shared-session adapter
 
 The opt-in
-`GPU_NAM_EXPERIMENTAL_SHARED_WAVENET_SESSION=ON` build uses the provisional
+`GPU_NAM_EXPERIMENTAL_SHARED_WAVENET_SESSION=ON` build uses the
 `pulp::gpu_audio::GpuWaveNetSession` API from Pulp #8885. The released submodule
-pin intentionally remains unchanged until that API lands. To experiment locally,
-check out the exact reviewed Pulp head in `./pulp` before configuring; do not
-replace the committed pin with a moving PR branch. This adapter is a validation
-path only and is not part of the default GPU engine.
+pin now contains that API. This adapter remains a validation path only and is
+not part of the default GPU engine. Keep experiments on an exact reviewed Pulp
+commit; do not replace the committed pin with a moving PR branch.
 
 ## Integration boundary
 
