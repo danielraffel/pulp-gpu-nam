@@ -91,7 +91,11 @@ bool GpuNamSharedSessionNode::prepare() {
         auto result = gpu_audio::GpuWaveNetSession::create({
             .descriptor = model_descriptor,
             .weights = weights,
-            .slots = 2,
+            // Keep enough provider slots to cover the configured algorithmic
+            // lead plus one in-flight block. Two slots are sufficient for the
+            // smallest probe, but sustained pacing at larger leads can turn a
+            // transient capacity-full result into a sequence gap.
+            .slots = std::max<std::uint32_t>(2, latency_blocks_ + 2),
         });
         if (!result) {
             sessions_[channel].reset();
