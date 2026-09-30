@@ -1,0 +1,60 @@
+=== gpu-nam-gpu-audio-capability-probe ===
+capability_report=present
+path=0
+provider=0
+eligibility=0
+prepared=false
+rc=0
+=== gpu-nam-gpu-test ===
+Randomness seeded to: 656936983
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+gpu-nam-gpu-test is a Catch2 v3.6.0 host application.
+Run with -? for options
+
+-------------------------------------------------------------------------------
+CPU oracle loads the real .nam capture
+-------------------------------------------------------------------------------
+/private/tmp/gpu-nam-pulp-v08830-20260930/src/test_gpu_nam_real.cpp:91
+...............................................................................
+
+/private/tmp/gpu-nam-pulp-v08830-20260930/src/test_gpu_nam_real.cpp:95: 
+warning:
+  could not load /tmp/test.nam (could not open file: /tmp/test.nam); skipping
+
+[pulp:info]  GpuCompute: pipelines created (device shared: false)
+-------------------------------------------------------------------------------
+GPU NAM reproduces the CPU oracle on the real model, single block
+-------------------------------------------------------------------------------
+/private/tmp/gpu-nam-pulp-v08830-20260930/src/test_gpu_nam_real.cpp:108
+...............................................................................
+
+/private/tmp/gpu-nam-pulp-v08830-20260930/src/test_gpu_nam_real.cpp:113: 
+warning:
+  could not load /tmp/test.nam (could not open file: /tmp/test.nam); skipping
+
+[pulp:info]  GpuCompute: pipelines created (device shared: false)
+-------------------------------------------------------------------------------
+GPU NAM is streaming-continuous on the real model
+-------------------------------------------------------------------------------
+/private/tmp/gpu-nam-pulp-v08830-20260930/src/test_gpu_nam_real.cpp:132
+...............................................................................
+
+/private/tmp/gpu-nam-pulp-v08830-20260930/src/test_gpu_nam_real.cpp:137: 
+warning:
+  could not load /tmp/test.nam (could not open file: /tmp/test.nam); skipping
+
+[pulp:info]  GpuCompute: pipelines created (device shared: false)
+[pulp:info]  GpuCompute: pipelines created (device shared: false)
+[pulp:info]  GpuCompute: pipelines created (device shared: false)
+[pulp:info]  GpuCompute: pipelines created (device shared: false)
+===============================================================================
+All tests passed (8 assertions in 5 test cases)
+
+rc=0
+=== gpu-nam-physical-lifecycle-test ===
+16 lifecycle sequencing controls passed
+rc=0
+=== gpu-nam-delivery-status-test ===
+19 delivery source/label checks passed
+rc=0

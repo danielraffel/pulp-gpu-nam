@@ -1,0 +1,23 @@
+Test project /private/tmp/gpu-nam-pulp-v08830-20260930/build-installed
+    Start 36: gpu-nam-model-test
+1/9 Test #36: gpu-nam-model-test ...............   Passed    0.37 sec
+    Start 37: gpu-nam-a2-test
+2/9 Test #37: gpu-nam-a2-test ..................   Passed    0.20 sec
+    Start 38: gpu-nam-convnet-test
+3/9 Test #38: gpu-nam-convnet-test .............   Passed    0.39 sec
+    Start 39: gpu-nam-lstm-test
+4/9 Test #39: gpu-nam-lstm-test ................   Passed    0.21 sec
+    Start 40: gpu-nam-linear-test
+5/9 Test #40: gpu-nam-linear-test ..............   Passed    0.21 sec
+    Start 41: gpu-nam-keras-test
+6/9 Test #41: gpu-nam-keras-test ...............   Passed    0.20 sec
+    Start 42: gpu-nam-license-test
+7/9 Test #42: gpu-nam-license-test .............   Passed    0.22 sec
+    Start 45: gpu-nam-output-cal-test
+8/9 Test #45: gpu-nam-output-cal-test ..........   Passed    0.19 sec
+    Start 47: gpu-nam-paced-options
+9/9 Test #47: gpu-nam-paced-options ............   Passed    0.20 sec
+
+100% tests passed, 0 tests failed out of 9
+
+Total Test time (real) =   2.20 sec
