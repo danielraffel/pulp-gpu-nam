@@ -1,0 +1,61 @@
+Test project /private/tmp/gpu-nam-pulp-v08830-20260930/build-installed
+      Start  2: GPU NAM CPU engine produces finite non-trivial amped output
+ 1/28 Test  #2: GPU NAM CPU engine produces finite non-trivial amped output .....................   Passed    0.14 sec
+      Start  3: GPU NAM bypass passes the dry signal
+ 2/28 Test  #3: GPU NAM bypass passes the dry signal ............................................   Passed    0.14 sec
+      Start  4: GPU NAM GPU engine reproduces the CPU engine
+ 3/28 Test  #4: GPU NAM GPU engine reproduces the CPU engine ....................................   Passed    0.75 sec
+      Start  5: GPU NAM GPU engine keeps stereo channels independent on the shared device
+ 4/28 Test  #5: GPU NAM GPU engine keeps stereo channels independent on the shared device .......   Passed    0.79 sec
+      Start  6: GPU NAM Engine=Auto resolves once at prepare and the choice takes effect
+ 5/28 Test  #6: GPU NAM Engine=Auto resolves once at prepare and the choice takes effect ........   Passed    0.25 sec
+      Start  7: GPU NAM dual-mono fast path stays bit-exact through channel divergence
+ 6/28 Test  #7: GPU NAM dual-mono fast path stays bit-exact through channel divergence ..........   Passed    0.25 sec
+      Start  8: GPU NAM CPU-only path reports zero latency and matches the re-block path
+ 7/28 Test  #8: GPU NAM CPU-only path reports zero latency and matches the re-block path ........   Passed    0.04 sec
+      Start  9: GPU NAM direct path shares one inference and stays bit-exact on divergence
+ 8/28 Test  #9: GPU NAM direct path shares one inference and stays bit-exact on divergence ......   Passed    0.03 sec
+      Start 10: GPU NAM noise gate attenuates a sub-threshold signal
+ 9/28 Test #10: GPU NAM noise gate attenuates a sub-threshold signal ............................   Passed    0.25 sec
+      Start 11: GPU NAM EQ is transparent when flat and shapes tone when boosted
+10/28 Test #11: GPU NAM EQ is transparent when flat and shapes tone when boosted ................   Passed    0.37 sec
+      Start 12: GPU NAM Normalize retargets output to the model loudness
+11/28 Test #12: GPU NAM Normalize retargets output to the model loudness ........................   Passed    0.26 sec
+      Start 13: GPU NAM Calibrated retargets to the user reference level
+12/28 Test #13: GPU NAM Calibrated retargets to the user reference level ........................   Passed    0.25 sec
+      Start 14: GPU NAM resamples around an off-rate host
+13/28 Test #14: GPU NAM resamples around an off-rate host .......................................   Passed    0.16 sec
+      Start 15: GPU NAM cabinet swap is click-free
+14/28 Test #15: GPU NAM cabinet swap is click-free ..............................................   Passed    0.21 sec
+      Start 16: GPU NAM survives rapid consecutive cabinet swaps
+15/28 Test #16: GPU NAM survives rapid consecutive cabinet swaps ................................   Passed    0.28 sec
+      Start 17: GPU NAM crossfade never blends an IR engine against itself
+16/28 Test #17: GPU NAM crossfade never blends an IR engine against itself ......................   Passed    0.01 sec
+      Start 18: GPU NAM amps identically under any host block size
+17/28 Test #18: GPU NAM amps identically under any host block size ..............................   Passed    0.82 sec
+      Start 19: GPU NAM applies a loaded cabinet IR
+18/28 Test #19: GPU NAM applies a loaded cabinet IR .............................................   Passed    0.49 sec
+      Start 20: GPU NAM load_model rebuilds without NaNs
+19/28 Test #20: GPU NAM load_model rebuilds without NaNs ........................................   Passed    0.28 sec
+      Start 22: GPU NAM file browse: list_files filters by extension, sorted
+20/28 Test #22: GPU NAM file browse: list_files filters by extension, sorted ....................   Passed    0.01 sec
+      Start 23: GPU NAM file browse: neighbor cycles and wraps
+21/28 Test #23: GPU NAM file browse: neighbor cycles and wraps ..................................   Passed    0.01 sec
+      Start 24: GPU NAM clear resets the model + IR slots
+22/28 Test #24: GPU NAM clear resets the model + IR slots .......................................   Passed    0.01 sec
+      Start 25: GPU NAM streams real model captures end-to-end
+23/28 Test #25: GPU NAM streams real model captures end-to-end ..................................   Passed    0.66 sec
+      Start 26: GPU NAM streams a real IR end-to-end
+24/28 Test #26: GPU NAM streams a real IR end-to-end ............................................   Passed    0.25 sec
+      Start 27: GPU NAM streams ConvNet and Linear captures end-to-end
+25/28 Test #27: GPU NAM streams ConvNet and Linear captures end-to-end ..........................   Passed    0.02 sec
+      Start 28: GPU NAM Slim size selects a SlimmableContainer variant end to end
+26/28 Test #28: GPU NAM Slim size selects a SlimmableContainer variant end to end ...............   Passed    0.03 sec
+      Start 29: GPU NAM defaults Output Mode to Normalized and Slim to Lite (parity with NAM)
+27/28 Test #29: GPU NAM defaults Output Mode to Normalized and Slim to Lite (parity with NAM) ...   Passed    0.01 sec
+      Start 30: GPU NAM stamped engine requests preserve active history until reprepare
+28/28 Test #30: GPU NAM stamped engine requests preserve active history until reprepare .........   Passed    5.70 sec
+
+100% tests passed, 0 tests failed out of 28
+
+Total Test time (real) =  12.48 sec

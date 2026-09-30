@@ -1,0 +1,47 @@
+Test project /private/tmp/gpu-nam-pulp-v08830-20260930/build-installed
+      Start  1: gpu-nam-sdk-contract
+ 1/21 Test  #1: gpu-nam-sdk-contract ..................   Passed    0.08 sec
+      Start 34: gpu-nam-gpu-test
+ 2/21 Test #34: gpu-nam-gpu-test ......................   Passed    4.59 sec
+      Start 35: gpu-nam-gpu-audio-capability-probe
+ 3/21 Test #35: gpu-nam-gpu-audio-capability-probe ....   Passed    0.29 sec
+      Start 48: gpu-nam-stamped-32-lead-1
+ 4/21 Test #48: gpu-nam-stamped-32-lead-1 .............   Passed    0.78 sec
+      Start 49: gpu-nam-stamped-64-lead-1
+ 5/21 Test #49: gpu-nam-stamped-64-lead-1 .............   Passed    0.44 sec
+      Start 50: gpu-nam-stamped-128-lead-1
+ 6/21 Test #50: gpu-nam-stamped-128-lead-1 ............   Passed    0.44 sec
+      Start 51: gpu-nam-stamped-512-lead-1
+ 7/21 Test #51: gpu-nam-stamped-512-lead-1 ............   Passed    0.44 sec
+      Start 52: gpu-nam-stamped-32-lead-2
+ 8/21 Test #52: gpu-nam-stamped-32-lead-2 .............   Passed    0.45 sec
+      Start 53: gpu-nam-stamped-64-lead-2
+ 9/21 Test #53: gpu-nam-stamped-64-lead-2 .............   Passed    0.44 sec
+      Start 54: gpu-nam-stamped-128-lead-2
+10/21 Test #54: gpu-nam-stamped-128-lead-2 ............   Passed    0.44 sec
+      Start 55: gpu-nam-stamped-512-lead-2
+11/21 Test #55: gpu-nam-stamped-512-lead-2 ............   Passed    0.44 sec
+      Start 56: gpu-nam-stamped-32-lead-4
+12/21 Test #56: gpu-nam-stamped-32-lead-4 .............   Passed    0.45 sec
+      Start 57: gpu-nam-stamped-64-lead-4
+13/21 Test #57: gpu-nam-stamped-64-lead-4 .............   Passed    0.44 sec
+      Start 58: gpu-nam-stamped-128-lead-4
+14/21 Test #58: gpu-nam-stamped-128-lead-4 ............   Passed    0.44 sec
+      Start 59: gpu-nam-stamped-512-lead-4
+15/21 Test #59: gpu-nam-stamped-512-lead-4 ............   Passed    0.45 sec
+      Start 60: gpu-nam-stamped-32-lead-8
+16/21 Test #60: gpu-nam-stamped-32-lead-8 .............   Passed    0.44 sec
+      Start 61: gpu-nam-stamped-64-lead-8
+17/21 Test #61: gpu-nam-stamped-64-lead-8 .............   Passed    0.44 sec
+      Start 62: gpu-nam-stamped-128-lead-8
+18/21 Test #62: gpu-nam-stamped-128-lead-8 ............   Passed    0.44 sec
+      Start 63: gpu-nam-stamped-512-lead-8
+19/21 Test #63: gpu-nam-stamped-512-lead-8 ............   Passed    0.45 sec
+      Start 67: gpu-nam-delivery-status
+20/21 Test #67: gpu-nam-delivery-status ...............   Passed    0.22 sec
+      Start 68: gpu-nam-physical-lifecycle-contract
+21/21 Test #68: gpu-nam-physical-lifecycle-contract ...   Passed    0.21 sec
+
+100% tests passed, 0 tests failed out of 21
+
+Total Test time (real) =  12.82 sec
