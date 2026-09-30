@@ -39,6 +39,7 @@ std::unique_ptr<GpuNamStampedNode> GpuNamStampedNode::create(
         .weight_count = model.weights_size()};
     config.session.weights = {model.weights_data(), model.weights_size()};
     config.session.completion_policy = completion.policy;
+    config.session.slots = 16; // experiment: match ring capacity while measuring input saturation
     // The relative worker budget is shared across channels for each pump.
     // A zero worker budget never calls the waiting service path.
     config.completion_service_wait_ns = completion.worker_wait_ns;
