@@ -34,3 +34,19 @@ GPU speedup or hard-realtime behavior. The consumer exposes callback-side
 phases only; GPU admission, execution, and completion timestamps remain
 unavailable. The long-duration matched GPU/CPU campaign therefore remains a
 separate, quiet-host experiment.
+
+## Product bundle smoke
+
+The same Release build also produced the CLAP and standalone product bundles.
+Both completed Pulp's relocatability/shipping scans, and the CLAP dynamic-load
+test passed. After explicitly building the two product test targets, their
+direct Catch2 runs passed:
+
+- `gpu-nam-plugin-test`: 550,934 assertions, 29 cases
+- `gpu-nam-ui-test`: 19 assertions, 5 cases
+- `clap-dlopen-GpuNam`: passed
+
+The bundle directory hashes were `fb600f9c3018df020e83fdb209dfad78e7c2cdb8f525b1d1e02a05905141d894`
+for `GpuNam.clap` and `90673f4320f353a9ff4d9707c61293b362274b3760d327489bf9d493a16cb57c`
+for `GpuNam.app`. These are unsigned local build artifacts; `codesign
+--verify` therefore does not pass, and no notarized release claim follows.
