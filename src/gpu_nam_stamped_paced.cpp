@@ -13,6 +13,11 @@
 #include <iostream>
 #include <thread>
 #include <unistd.h>
+#if defined(__APPLE__)
+#include <AudioToolbox/AudioWorkInterval.h>
+#include <mach/mach_time.h>
+#include <os/workgroup.h>
+#endif
 
 namespace pulp::examples {
 namespace {
@@ -50,6 +55,23 @@ int run_stamped_paced(const nam::NamModel& model, unsigned frames, unsigned lead
             }
     std::array<nam::NamModel, channels> cpu{model, model};
     std::vector<float> delay(std::size_t(lead) * stride);
+#if defined(__APPLE__)
+    os_workgroup_interval_t work_interval = nullptr;
+    os_workgroup_join_token_s master_workgroup_token{};
+    bool master_workgroup_joined = false;
+    if (options.audio_work_interval) {
+        work_interval = AudioWorkIntervalCreate("pulp-gpu-nam", OS_CLOCK_MACH_ABSOLUTE_TIME, nullptr);
+        if (!work_interval || os_workgroup_join(work_interval, &master_workgroup_token) != 0) {
+            if (work_interval) os_release(work_interval);
+            std::cerr << "audio_work_interval_prepare_failed=1\n";
+            return 8;
+        }
+        master_workgroup_joined = true;
+    }
+#elif !defined(__APPLE__)
+    void* work_interval = nullptr;
+    if (options.audio_work_interval) return 64;
+#endif
     std::unique_ptr<GpuNamStampedNode> node;
     std::unique_ptr<GpuNamStagedDiagnostic> staged;
     gpu_audio::GpuAudioTransport transport;
@@ -58,7 +80,7 @@ int run_stamped_paced(const nam::NamModel& model, unsigned frames, unsigned lead
     } else if (options.staged_gpu) {
         staged = std::make_unique<GpuNamStagedDiagnostic>(model, frames, lead, options.inject_forward_failure);
         if (!staged->prepare() ||
-            !transport.prepare(staged.get(), {.ring_blocks=16, .run_worker_thread=!options.force_fallback, .wake_on_write=true, .audio_workgroup=nullptr, .join_audio_workgroup=options.realtime_worker})) {
+            !transport.prepare(staged.get(), {.ring_blocks=16, .run_worker_thread=!options.force_fallback, .wake_on_write=true, .audio_workgroup=work_interval, .join_audio_workgroup=(options.realtime_worker || options.audio_work_interval)})) {
             std::cerr << "staged_prepare_failed=1\n"; return 8;
         }
         std::cout << "staged_backend=" << staged->backend() << " staged_device_count=1\n";
@@ -69,7 +91,7 @@ int run_stamped_paced(const nam::NamModel& model, unsigned frames, unsigned lead
                          .capture_admissions = true,
                          .capture_callback_timing = true,
                          .success_stride = 1})) || !node->prepare() ||
-            !transport.prepare(node.get(), {.ring_blocks=16, .run_worker_thread=!options.force_fallback, .wake_on_write=true, .audio_workgroup=nullptr, .join_audio_workgroup=options.realtime_worker})) {
+            !transport.prepare(node.get(), {.ring_blocks=16, .run_worker_thread=!options.force_fallback, .wake_on_write=true, .audio_workgroup=work_interval, .join_audio_workgroup=(options.realtime_worker || options.audio_work_interval)})) {
             std::cerr << "shared_prepare_failed=1 cause=unclassified\n"; return 8;
         }
         const auto capability = transport.capability_report();
@@ -98,6 +120,21 @@ int run_stamped_paced(const nam::NamModel& model, unsigned frames, unsigned lead
         row.scheduled = origin_ns + paced_offset_ns(b, frames);
         row.deadline = origin_ns + paced_offset_ns(b + 1, frames);
         std::this_thread::sleep_until(origin + std::chrono::nanoseconds(paced_offset_ns(b, frames)));
+#if defined(__APPLE__)
+        bool interval_started = false;
+        if (work_interval) {
+            const auto start_tick = mach_absolute_time();
+            static mach_timebase_info_data_t timebase = [] {
+                mach_timebase_info_data_t value{};
+                mach_timebase_info(&value);
+                return value;
+            }();
+            const auto period_ns = std::uint64_t(frames) * 1'000'000'000ULL / 48000ULL;
+            const auto period_ticks = period_ns * timebase.denom / timebase.numer;
+            interval_started = os_workgroup_interval_start(
+                work_interval, start_tick, start_tick + period_ticks, nullptr) == 0;
+        }
+#endif
         const auto delivery_before = options.cpu_only ? PacedDeliveryCounts{} :
             paced_delivery_counts(transport.delivery_snapshot());
         row.start = nanoseconds(Clock::now());
@@ -110,6 +147,9 @@ int run_stamped_paced(const nam::NamModel& model, unsigned frames, unsigned lead
             cursor = (cursor + 1) % lead;
         } else transport.process(in, out, frames);
         row.end = nanoseconds(Clock::now());
+#if defined(__APPLE__)
+        if (work_interval && interval_started) (void)os_workgroup_interval_finish(work_interval, nullptr);
+#endif
         if (options.cpu_only) {
             row.selected = b < lead ? PacedSelection::Priming : PacedSelection::CpuBaseline;
         } else {
@@ -127,6 +167,10 @@ int run_stamped_paced(const nam::NamModel& model, unsigned frames, unsigned lead
     const auto stats = transport.stats();
     const bool fenced_before_release = node && node->fenced();
     transport.release();
+#if defined(__APPLE__)
+    if (master_workgroup_joined) os_workgroup_leave(work_interval, &master_workgroup_token);
+    if (work_interval) os_release(work_interval);
+#endif
     const auto cpu_calls = node ? node->cpu_model_calls() : staged ? staged->cpu_model_calls() : blocks * channels;
     const auto failed_forwards = staged ? staged->failed_forwards() : 0;
     const bool drained = !node || node->release();
@@ -186,6 +230,7 @@ int run_stamped_paced(const nam::NamModel& model, unsigned frames, unsigned lead
         << " trace_enabled=" << options.trace
         << " wake_on_write=" << (!options.cpu_only && !options.force_fallback)
         << " realtime_worker_requested=" << options.realtime_worker
+        << " audio_work_interval_requested=" << options.audio_work_interval
         << " worker_poll_interval_us=" << (options.cpu_only ? 0 : std::clamp(frames * 1'000'000u / 48000u / 4u, 50u, 2000u))
         << " forced_fallback=" << options.force_fallback << " failed_gpu_forwards=" << failed_forwards
         << " cpu_model_calls=" << cpu_calls << " gpu_callbacks=" << gpu << " fallback_callbacks=" << fallback
@@ -199,6 +244,8 @@ int run_stamped_paced(const nam::NamModel& model, unsigned frames, unsigned lead
         << " transport_priming_callbacks=" << selected_counts[5]
         << " invalid_callbacks=" << selected_counts[6]
         << " worker_produced=" << stats.produced_blocks << " transport_misses=" << stats.miss_blocks
+        << " worker_workgroup_joined=" << stats.worker_workgroup_joined
+        << " worker_workgroup_join_failures=" << stats.worker_workgroup_join_failures
         << " fenced_before_release=" << fenced_before_release
         << " input_dropped_frames=" << stats.input_dropped_frames << " resynced_blocks=" << stats.resynced_blocks
         << " callback_total_ns=" << callback_ns << " callback_max_ns=" << max_callback
