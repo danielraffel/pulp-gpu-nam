@@ -58,7 +58,7 @@ int run_stamped_paced(const nam::NamModel& model, unsigned frames, unsigned lead
     } else if (options.staged_gpu) {
         staged = std::make_unique<GpuNamStagedDiagnostic>(model, frames, lead, options.inject_forward_failure);
         if (!staged->prepare() ||
-            !transport.prepare(staged.get(), {.ring_blocks=16, .run_worker_thread=!options.force_fallback, .wake_on_write=true})) {
+            !transport.prepare(staged.get(), {.ring_blocks=16, .run_worker_thread=!options.force_fallback, .wake_on_write=true, .audio_workgroup=nullptr, .join_audio_workgroup=options.realtime_worker})) {
             std::cerr << "staged_prepare_failed=1\n"; return 8;
         }
         std::cout << "staged_backend=" << staged->backend() << " staged_device_count=1\n";
@@ -69,7 +69,7 @@ int run_stamped_paced(const nam::NamModel& model, unsigned frames, unsigned lead
                          .capture_admissions = true,
                          .capture_callback_timing = true,
                          .success_stride = 1})) || !node->prepare() ||
-            !transport.prepare(node.get(), {.ring_blocks=16, .run_worker_thread=!options.force_fallback, .wake_on_write=true})) {
+            !transport.prepare(node.get(), {.ring_blocks=16, .run_worker_thread=!options.force_fallback, .wake_on_write=true, .audio_workgroup=nullptr, .join_audio_workgroup=options.realtime_worker})) {
             std::cerr << "shared_prepare_failed=1 cause=unclassified\n"; return 8;
         }
         const auto capability = transport.capability_report();
@@ -185,6 +185,7 @@ int run_stamped_paced(const nam::NamModel& model, unsigned frames, unsigned lead
         << " worker_wait_ns=" << completion.worker_wait_ns
         << " trace_enabled=" << options.trace
         << " wake_on_write=" << (!options.cpu_only && !options.force_fallback)
+        << " realtime_worker_requested=" << options.realtime_worker
         << " worker_poll_interval_us=" << (options.cpu_only ? 0 : std::clamp(frames * 1'000'000u / 48000u / 4u, 50u, 2000u))
         << " forced_fallback=" << options.force_fallback << " failed_gpu_forwards=" << failed_forwards
         << " cpu_model_calls=" << cpu_calls << " gpu_callbacks=" << gpu << " fallback_callbacks=" << fallback

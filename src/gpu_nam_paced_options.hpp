@@ -9,6 +9,7 @@ namespace pulp::examples {
 struct GpuNamPacedOptions {
     bool enabled = false, cpu_only = false, inject_error = false;
     bool staged_gpu = false, force_fallback = false, inject_forward_failure = false;
+    bool realtime_worker = false;
     bool trace = false;
     std::uint32_t seconds = 10, input_blocks = 0;
     bool seconds_explicit = false;
@@ -18,6 +19,7 @@ struct GpuNamPacedOptions {
         if (arg == "--force-fallback") { force_fallback = true; return true; }
         if (arg == "--inject-forward-failure") { inject_forward_failure = true; return true; }
         if (arg == "--trace") { trace = true; return true; }
+        if (arg == "--realtime-worker") { realtime_worker = true; return true; }
         if (arg == "--paced") { enabled = true; return true; }
         if (arg == "--cpu-baseline") { cpu_only = true; return true; }
         if (arg.starts_with("--sidecar=")) { sidecar = arg.substr(10); return !sidecar.empty(); }
