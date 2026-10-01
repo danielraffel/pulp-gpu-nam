@@ -147,14 +147,12 @@ else()
     # in every Pulp example/test — GPU NAM ships its own tests below).
     set(PULP_ENABLE_GPU     ON  CACHE BOOL "" FORCE)
     set(PULP_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-    # Exact-provider validation is implemented by Pulp's configure-time test
-    # surface. Keep the normal plugin build lean, but allow an authenticated
-    # source validation build to opt that surface back in.
-    if(PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF)
-        set(PULP_BUILD_TESTS ON CACHE BOOL "" FORCE)
-    else()
-        set(PULP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-    endif()
+    # Exact-provider validation is a configure-time provider identity check.
+    # Keep Pulp's full unit-test tree disabled in the consumer: its test data
+    # and helper paths are rooted at a standalone Pulp checkout, while GPU-NAM
+    # owns the downstream validation suite. The exact proof still runs from
+    # Pulp's GPU-audio provider CMake surface.
+    set(PULP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 
     add_subdirectory(pulp)
 
