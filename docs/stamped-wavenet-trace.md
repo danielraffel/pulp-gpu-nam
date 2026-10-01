@@ -21,7 +21,7 @@ Pulp tracing session around the paced run. Plugin hosts keep their existing
 adapter-owned session lifecycle.
 
 The executable must be linked against a Pulp SDK built with tracing enabled
-(`PULP_TRACING=ON`, exporting `Pulp::tracing`). The ordinary v0.885.0 SDK
+(`PULP_TRACING=ON`, exporting `Pulp::tracing`). The ordinary v0.890.0 SDK
 consumer build is intentionally not a tracing build, so setting
 `PULP_TRACE_PATH` alone is insufficient and `--trace` fails closed. Build or
 install a tracing-enabled SDK/profile first, then verify the capture with
