@@ -4,10 +4,10 @@ GPU NAM builds against the Pulp SDK vendored at `./pulp`. The submodule is pinne
 to a specific Pulp commit so a clone always builds against a known framework
 version.
 
-The current pin is Pulp SDK v0.884.0, source commit
-`18cf7c809d86fb0189ab500cb2c6ccecb2b6dc10`. The matching Darwin arm64 SDK
+The current pin is Pulp SDK v0.885.0, source commit
+`b46afb476b0e640cd3146f34a15912c1a52887da`. The matching Darwin arm64 SDK
 artifact has SHA-256
-`c108dbc0988d331127d90f106a70a9908c0a63ab524381c3f68d64acad87a475`.
+`7be3387d213f3bfe52f60c578ad548edc58a3d1ceb5a18b19cefcdc516665f06`.
 
 ## Updating the pin
 
