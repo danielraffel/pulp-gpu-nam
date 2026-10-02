@@ -11,3 +11,5 @@ This is provisional development evidence. It is not official Pulp SDK 0.893.0 ev
 - Rows: max_inflight 1, 2, 4, 8
 
 Every row passed numerical parity and observed GPU delivery. This short run is a provider/consumer correctness and fallback-accounting check, not a realtime-suitability result. GPU timestamps were unavailable and the worker used an ordinary OS thread.
+
+A second 1,000-block matrix was run with the same settings. It remained numerically correct, but ordinary-thread scheduling produced callback deadline misses (2, 0, 0, and 11 for max_inflight 1, 2, 4, and 8 respectively). These rows reinforce that the seam is useful for controlled comparison, but are not evidence that higher in-flight depth improves realtime reliability.
