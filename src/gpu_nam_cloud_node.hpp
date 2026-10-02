@@ -6,8 +6,9 @@
 // It wraps one GpuNam per channel, all sharing ONE compute device: the WaveNet
 // plans are keyed by (block_size, instance), so each channel gets its own plan
 // slot (instance = channel) and its own dilation history on the shared device.
-// Stereo therefore costs one Dawn device + one weight/pipeline set instead of
-// two. It runs as a GpuAudioNode on the transport's non-real-time worker.
+// Multichannel instances therefore share one Dawn device + one weight/pipeline set
+// instead of creating one device per channel. It runs as a GpuAudioNode on the
+// transport's non-real-time worker.
 // process_block() runs the GPU forward for exactly one fixed block per channel;
 // the mono NAM model is applied independently to each channel.
 //
@@ -32,7 +33,7 @@
 
 namespace pulp::examples {
 
-inline constexpr std::uint32_t kNamChannels = 2;
+inline constexpr std::uint32_t kNamChannels = 64;
 
 class GpuNamCloudNode : public gpu_audio::GpuAudioNode {
 public:

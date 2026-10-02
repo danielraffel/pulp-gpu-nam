@@ -224,6 +224,17 @@ if(TARGET pulp::render AND TARGET pulp::gpu-audio)
         list(APPEND _gpu_nam_experimental_sources gpu_nam_stamped_node.cpp)
         add_executable(gpu-nam-stamped-validation
             gpu_nam_stamped_node.cpp gpu_nam_stamped_paced.cpp test_gpu_nam_stamped_node.cpp)
+        add_executable(gpu-nam-stamped-multichannel-validation
+            gpu_nam_stamped_node.cpp test_gpu_nam_stamped_multichannel.cpp)
+        target_link_libraries(gpu-nam-stamped-multichannel-validation PRIVATE pulp::gpu-audio)
+        target_compile_definitions(gpu-nam-stamped-multichannel-validation PRIVATE
+            GPU_NAM_MODEL_PATH="${CMAKE_CURRENT_SOURCE_DIR}/models/example.nam")
+        if(GPU_NAM_BUILD_TESTS)
+            add_test(NAME gpu-nam-stamped-multichannel-4096
+                COMMAND gpu-nam-stamped-multichannel-validation)
+            set_tests_properties(gpu-nam-stamped-multichannel-4096 PROPERTIES
+                TIMEOUT 300 RESOURCE_LOCK pulp_gpu)
+        endif()
         target_link_libraries(gpu-nam-stamped-validation PRIVATE pulp::gpu-audio)
         target_compile_definitions(gpu-nam-stamped-validation PRIVATE
             GPU_NAM_MODEL_PATH="${CMAKE_CURRENT_SOURCE_DIR}/models/example.nam")

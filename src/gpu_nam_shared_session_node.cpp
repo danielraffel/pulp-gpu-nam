@@ -26,7 +26,7 @@ gpu_audio::GpuAudioNodeDescriptor GpuNamSharedSessionNode::descriptor() const {
 }
 
 bool GpuNamSharedSessionNode::prepare() {
-    if (model_ == nullptr || channels_ == 0 || channels_ > kNamChannels ||
+    if (model_ == nullptr || channels_ == 0 || channels_ > kMaxNamChannels ||
         latency_blocks_ == 0 || latency_blocks_ > 8 ||
         block_size_ == 0 || sample_rate_ == 0)
         return false;

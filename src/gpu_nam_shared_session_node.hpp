@@ -43,7 +43,7 @@ class GpuNamSharedSessionNode final : public gpu_audio::GpuAudioNode {
                               std::uint32_t n) noexcept override;
 
     bool gpu_available() const noexcept {
-        return prepared_ && channels_ > 0 && channels_ <= kNamChannels &&
+        return prepared_ && channels_ > 0 && channels_ <= kMaxNamChannels &&
                sessions_[0] != nullptr && (channels_ == 1 || sessions_[1] != nullptr);
     }
 
@@ -62,7 +62,7 @@ class GpuNamSharedSessionNode final : public gpu_audio::GpuAudioNode {
     std::uint64_t fallback_prime_blocks() const noexcept { return fallback_prime_blocks_; }
 
   private:
-    static constexpr std::uint32_t kNamChannels = 2;
+    static constexpr std::uint32_t kMaxNamChannels = 64;
     static constexpr std::uint64_t kWorkerWaitBudgetNs = 2'000'000;
 
     static std::uint64_t now_ns() noexcept;
@@ -84,17 +84,17 @@ class GpuNamSharedSessionNode final : public gpu_audio::GpuAudioNode {
 
     std::vector<std::vector<std::uint32_t>> dilations_;
     std::vector<gpu_audio::GpuWaveNetLayerDescriptor> descriptors_;
-    std::array<std::unique_ptr<gpu_audio::GpuWaveNetSession>, kNamChannels> sessions_{};
-    std::array<nam::NamModel, kNamChannels> worker_cpu_{};
-    std::array<nam::NamModel, kNamChannels> realtime_cpu_{};
-    std::array<std::vector<float>, kNamChannels> gpu_output_{};
+    std::array<std::unique_ptr<gpu_audio::GpuWaveNetSession>, kMaxNamChannels> sessions_{};
+    std::array<nam::NamModel, kMaxNamChannels> worker_cpu_{};
+    std::array<nam::NamModel, kMaxNamChannels> realtime_cpu_{};
+    std::array<std::vector<float>, kMaxNamChannels> gpu_output_{};
     // The transport reports one block of latency.  Keep a precomputed CPU
     // result for the current miss slot while advancing the fallback model on
     // every block, including GPU hits.  This mirrors GpuConvolver's
     // prime_fallback/process_cpu_fallback contract and prevents a miss after
     // GPU hits from resuming an old CPU history.
-    std::array<std::vector<float>, kNamChannels> fallback_output_{};
-    std::array<std::vector<float>, kNamChannels> fallback_delay_{};
+    std::array<std::vector<float>, kMaxNamChannels> fallback_output_{};
+    std::array<std::vector<float>, kMaxNamChannels> fallback_delay_{};
     std::uint32_t latency_blocks_ = 1;
     std::uint32_t fallback_delay_index_ = 0;
     std::vector<float> fallback_zero_input_{};
