@@ -60,3 +60,10 @@ VST3 `pluginval`, and lifecycle/watchdog contract tests.
 
 These are correctness, integration, and packaging checks. They do not establish
 hard realtime scheduling or deadline reliability.
+
+The direct `gpu-nam-gpu-test` verbose run passed (8 assertions in 5 cases).
+Its optional `/tmp/test.nam` real-capture cases reported `skipping` because that
+local fixture was not present; the passing GPU parity and streaming checks in
+this receipt therefore cover the bundled/synthetic test inputs. The separate
+long-run real-model receipts remain the authoritative evidence for 100,000-block
+GPU delivery.
