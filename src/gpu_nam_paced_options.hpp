@@ -11,6 +11,10 @@ struct GpuNamPacedOptions {
     bool staged_gpu = false, force_fallback = false, inject_forward_failure = false;
     bool realtime_worker = false, audio_work_interval = false;
     bool trace = false;
+    // Diagnostic-only provider/ring capacity override. The production default
+    // remains the stamped node's compiled capacity (16).
+    std::uint32_t capacity = 16;
+    bool capacity_explicit = false;
     std::uint32_t seconds = 10, input_blocks = 0;
     bool seconds_explicit = false;
     std::string sidecar;
@@ -23,6 +27,13 @@ struct GpuNamPacedOptions {
         if (arg == "--audio-work-interval") { audio_work_interval = true; return true; }
         if (arg == "--paced") { enabled = true; return true; }
         if (arg == "--cpu-baseline") { cpu_only = true; return true; }
+        if (arg.starts_with("--capacity=")) {
+            capacity_explicit = true;
+            const auto value = arg.substr(std::string_view("--capacity=").size());
+            const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), capacity);
+            return error == std::errc{} && end == value.data() + value.size() &&
+                   (capacity == 2 || capacity == 4 || capacity == 8);
+        }
         if (arg.starts_with("--sidecar=")) { sidecar = arg.substr(10); return !sidecar.empty(); }
         auto number = [&](std::string_view prefix, std::uint32_t& destination) {
             if (!arg.starts_with(prefix)) return false;
@@ -42,11 +53,12 @@ struct GpuNamPacedOptions {
     bool valid(std::uint32_t frames, std::uint32_t lead) const noexcept {
         if ((cpu_only && (staged_gpu || force_fallback || inject_forward_failure)) ||
             (inject_forward_failure && (!staged_gpu || force_fallback))) return false;
-        if (!enabled) return !staged_gpu && !force_fallback && !inject_forward_failure && !cpu_only && sidecar.empty() && !seconds_explicit && input_blocks == 0;
+        if (!enabled) return !staged_gpu && !force_fallback && !inject_forward_failure && !cpu_only &&
+                                  sidecar.empty() && !seconds_explicit && input_blocks == 0 && !capacity_explicit;
         if (sidecar.empty() || (seconds_explicit && input_blocks) || frames == 0) return false;
         const auto count = blocks(frames);
         // Two stereo float captures (input and output), capped before allocation.
-        return count > 0 && count <= 1'000'000 &&
+        return count > 0 && count <= 1'000'000 && capacity > lead &&
                (count + lead) * frames * 2 * sizeof(float) * 2 <= (1ULL << 30);
     }
 };

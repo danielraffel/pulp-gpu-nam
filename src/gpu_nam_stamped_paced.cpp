@@ -85,7 +85,8 @@ int run_stamped_paced(const nam::NamModel& model, unsigned frames, unsigned lead
         }
         std::cout << "staged_backend=" << staged->backend() << " staged_device_count=1\n";
     } else {
-        node = GpuNamStampedNode::create(model, channels, frames, 48000, lead, completion);
+        node = GpuNamStampedNode::create(model, channels, frames, 48000, lead, completion,
+                                         options.capacity);
         if (!node || (options.trace && !node->configure_trace({
                          .enabled = true,
                          .capture_admissions = true,
@@ -227,6 +228,8 @@ int run_stamped_paced(const nam::NamModel& model, unsigned frames, unsigned lead
         << " input_blocks=" << inputs_count << " drain_blocks=" << lead << " measured_blocks=" << blocks
         << " completion_policy=" << (options.staged_gpu ? "legacy_blocking_readback" : completion_policy_name(completion.policy))
         << " worker_wait_ns=" << completion.worker_wait_ns
+        << " requested_capacity=" << options.capacity
+        << " effective_capacity=" << options.capacity
         << " trace_enabled=" << options.trace
         << " wake_on_write=" << (!options.cpu_only && !options.force_fallback)
         << " realtime_worker_requested=" << options.realtime_worker

@@ -21,6 +21,12 @@ int main() {
     }
     if (!check(o.parse("--blocks=1000000")&&o.valid(32,2)&&!o.valid(128,2))) return 5;
     if (!check(o.parse("--trace") && o.trace)) return 5;
+    if (!check(o.parse("--capacity=8") && o.capacity == 8 && o.capacity_explicit &&
+               o.valid(32, 4) && !o.valid(32, 8))) return 5;
+    for (const auto arg : {"--capacity=0", "--capacity=3", "--capacity=16", "--capacity=abc"}) {
+        GpuNamPacedOptions invalid_capacity;
+        if (!check(!invalid_capacity.parse(arg))) return 5;
+    }
     if (!check(o.parse("--duration-seconds=10")&&!o.valid(32,2))) return 6;
     for (auto frames : {32u,64u,128u,512u}) {
         if (!check(paced_offset_ns(48000,frames)==std::uint64_t(frames)*1'000'000'000)) return 7;
