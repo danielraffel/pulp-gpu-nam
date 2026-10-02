@@ -64,6 +64,8 @@ option(GPU_NAM_EXPERIMENTAL_SHARED_WAVENET_SESSION
     "Build the provisional shared-memory WaveNet session adapter (default OFF)" OFF)
 option(GPU_NAM_EXPERIMENTAL_STAMPED_WAVENET
     "Build SDK-owned stamped WaveNet consumer validation (requires new SDK)" OFF)
+option(GPU_NAM_MAX_INFLIGHT_API
+    "Enable the SDK multi-flight max_inflight field (requires that API in the installed SDK)" OFF)
 option(GPU_NAM_EXPERIMENTAL_CPU_SHADOW_WORKER
     "Build the opt-in stateful CPU-shadow-worker readiness experiment" OFF)
 if(GPU_NAM_EXPERIMENTAL_STAMPED_WAVENET AND GPU_NAM_EXPERIMENTAL_SHARED_WAVENET_SESSION)
@@ -71,6 +73,9 @@ if(GPU_NAM_EXPERIMENTAL_STAMPED_WAVENET AND GPU_NAM_EXPERIMENTAL_SHARED_WAVENET_
 endif()
 if(GPU_NAM_EXPERIMENTAL_STAMPED_WAVENET)
     add_compile_definitions(GPU_NAM_EXPERIMENTAL_STAMPED_WAVENET=1)
+endif()
+if(GPU_NAM_MAX_INFLIGHT_API)
+    add_compile_definitions(PULP_GPU_WAVENET_MAX_INFLIGHT_API=1)
 endif()
 if(GPU_NAM_EXPERIMENTAL_SHARED_WAVENET_SESSION)
     add_compile_definitions(GPU_NAM_EXPERIMENTAL_SHARED_WAVENET_SESSION=1)

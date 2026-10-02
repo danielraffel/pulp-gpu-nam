@@ -20,6 +20,24 @@ int main() {
         if (!check(!invalid.parse(arg))) return 4;
     }
     if (!check(o.parse("--blocks=1000000")&&o.valid(32,2)&&!o.valid(128,2))) return 5;
+    GpuNamPacedOptions matrix;
+    matrix.enabled = true;
+    matrix.sidecar = "matrix.csv";
+    if (!check(matrix.parse("--capacity=8") && matrix.capacity == 8 &&
+               matrix.parse("--max-inflight=4") && matrix.max_inflight == 4 &&
+               matrix.valid(32, 2))) return 6;
+    for (const auto arg : {"--capacity=0", "--capacity=3", "--capacity=65", "--capacity=4x",
+                           "--max-inflight=0", "--max-inflight=3", "--max-inflight=9", "--max-inflight=4x"}) {
+        GpuNamPacedOptions invalid;
+        if (!check(!invalid.parse(arg))) return 7;
+    }
+    GpuNamPacedOptions invalid_combo;
+    invalid_combo.enabled = true;
+    invalid_combo.sidecar = "combo.csv";
+    if (!check(invalid_combo.parse("--capacity=4") &&
+               invalid_combo.parse("--max-inflight=1") && !invalid_combo.valid(32, 4))) return 8;
+    if (!check(invalid_combo.parse("--capacity=8") &&
+               invalid_combo.parse("--max-inflight=8") && !invalid_combo.valid(32, 4))) return 9;
     if (!check(o.parse("--trace") && o.trace)) return 5;
     if (!check(o.parse("--duration-seconds=10")&&!o.valid(32,2))) return 6;
     for (auto frames : {32u,64u,128u,512u}) {

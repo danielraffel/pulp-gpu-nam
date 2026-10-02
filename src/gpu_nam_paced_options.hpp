@@ -12,6 +12,9 @@ struct GpuNamPacedOptions {
     bool realtime_worker = false, audio_work_interval = false;
     bool trace = false;
     std::uint32_t seconds = 10, input_blocks = 0;
+    // Transport capacity and logical worker concurrency are independent knobs.
+    // Keep the defaults unchanged for existing validation invocations.
+    std::uint32_t capacity = 16, max_inflight = 1;
     bool seconds_explicit = false;
     std::string sidecar;
     bool parse(std::string_view arg) {
@@ -34,6 +37,15 @@ struct GpuNamPacedOptions {
             seconds_explicit = true;
             return number("--duration-seconds=", seconds);
         }
+        if (arg.starts_with("--capacity=")) {
+            if (!number("--capacity=", capacity)) return false;
+            return capacity == 2 || capacity == 4 || capacity == 8;
+        }
+        if (arg.starts_with("--max-inflight=")) {
+            if (!number("--max-inflight=", max_inflight)) return false;
+            return max_inflight == 1 || max_inflight == 2 ||
+                   max_inflight == 4 || max_inflight == 8;
+        }
         return number("--blocks=", input_blocks);
     }
     std::uint64_t blocks(std::uint32_t frames) const noexcept {
@@ -42,6 +54,8 @@ struct GpuNamPacedOptions {
     bool valid(std::uint32_t frames, std::uint32_t lead) const noexcept {
         if ((cpu_only && (staged_gpu || force_fallback || inject_forward_failure)) ||
             (inject_forward_failure && (!staged_gpu || force_fallback))) return false;
+        if (capacity <= lead || capacity > 64 || max_inflight == 0 || max_inflight > capacity - lead)
+            return false;
         if (!enabled) return !staged_gpu && !force_fallback && !inject_forward_failure && !cpu_only && sidecar.empty() && !seconds_explicit && input_blocks == 0;
         if (sidecar.empty() || (seconds_explicit && input_blocks) || frames == 0) return false;
         const auto count = blocks(frames);

@@ -85,7 +85,8 @@ int run_stamped_paced(const nam::NamModel& model, unsigned frames, unsigned lead
         }
         std::cout << "staged_backend=" << staged->backend() << " staged_device_count=1\n";
     } else {
-        node = GpuNamStampedNode::create(model, channels, frames, 48000, lead, completion);
+        node = GpuNamStampedNode::create(model, channels, frames, 48000, lead, completion,
+                                         options.capacity, options.max_inflight);
         if (!node || (options.trace && !node->configure_trace({
                          .enabled = true,
                          .capture_admissions = true,
@@ -225,6 +226,16 @@ int run_stamped_paced(const nam::NamModel& model, unsigned frames, unsigned lead
         << " scheduling=ordinary_os_thread hard_realtime=0 sample_rate=48000 channels=2 frames=" << frames << " lead=" << lead
         << " sidecar_schema=pulp.gpu_nam.paced.v2 input_sequence_provenance=callback_minus_lead_not_worker"
         << " input_blocks=" << inputs_count << " drain_blocks=" << lead << " measured_blocks=" << blocks
+        << " requested_capacity=" << options.capacity
+        << " effective_capacity=" << options.capacity
+        << " requested_max_inflight=" << options.max_inflight
+        << " effective_max_inflight=" << (
+#if defined(PULP_GPU_WAVENET_MAX_INFLIGHT_API)
+            options.max_inflight
+#else
+            1u
+#endif
+        )
         << " completion_policy=" << (options.staged_gpu ? "legacy_blocking_readback" : completion_policy_name(completion.policy))
         << " worker_wait_ns=" << completion.worker_wait_ns
         << " trace_enabled=" << options.trace
