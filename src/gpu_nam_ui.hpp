@@ -557,7 +557,10 @@ private:
 
         // Bottom: Model (left) + About (right), like the reference's Model-Info /
         // About blocks.
-        const float by = y + h - 74.0f;
+        // Keep the model/about block below the Bypass row.  The selector and
+        // its label occupy the preceding baseline; placing this block 20 px
+        // higher made MODEL visually collide with the Active button.
+        const float by = y + h - 54.0f;
         section_label(canvas, rowL, by, "MODEL");
         canvas.set_fill_color(colors_.text);
         canvas.set_font("Roboto", ss(11.0f));
