@@ -58,3 +58,10 @@ Raw files are retained in `/private/tmp` on the validation host:
 
 A quiet M1/M3/M5s rerun is required before attributing this long-run fallback
 rate to the SDK/provider rather than host contention.
+
+The 100,000-block raw receipt hashes are:
+
+```text
+25b0f3bf2313b51e91a90c6791c01bd45f849b006ebf271b7af7cffcf495ee23  gpu-nam-official-v08902-lead4-100k-20261002.csv
+446d093bf2d83db83b6a76695e56f48abe4debbcfa7e3bba60179fbd0f4b1c60  gpu-nam-official-v08902-lead4-100k-20261002.log
+```
