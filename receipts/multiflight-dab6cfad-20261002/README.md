@@ -13,3 +13,9 @@ This is provisional development evidence. It is not official Pulp SDK 0.893.0 ev
 Every row passed numerical parity and observed GPU delivery. This short run is a provider/consumer correctness and fallback-accounting check, not a realtime-suitability result. GPU timestamps were unavailable and the worker used an ordinary OS thread.
 
 A second 1,000-block matrix was run with the same settings. It remained numerically correct, but ordinary-thread scheduling produced callback deadline misses (2, 0, 0, and 11 for max_inflight 1, 2, 4, and 8 respectively). These rows reinforce that the seam is useful for controlled comparison, but are not evidence that higher in-flight depth improves realtime reliability.
+
+SDK artifact hashes:
+
+- `gpu_wavenet_realtime_node.hpp`: `2ffd35c47a6cc12d25e106fe4e10328aa9f29551342482cc505befa56e0f86df`
+- `libpulp-gpu-audio.a`: `4d779e621ceb67c0fecdd64294b9ee9549d9fca881782abfcf06ed68cf6074db`
+- SDK source checkout was clean at the stated commit; CMake build type was Release.
