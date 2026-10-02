@@ -158,3 +158,12 @@ up to one million input blocks. Input and output capture storage is capped at
 captures may be rejected. Long runs remain a separate experiment. Initial work
 has only syntax/parser/matrix validation; installed runtime and performance
 conclusions are still pending.
+
+For a bounded multi-flight sweep, paced runs also accept the diagnostic-only
+`--capacity=2`, `--capacity=4`, or `--capacity=8` option. It sets the stamped
+node's provider-slot and transport capacity for that process; the default
+remains 16. Capacity must exceed `--lead-blocks`, because the realtime bridge
+reserves lead space in addition to an in-flight slot. The stdout receipt records
+both `requested_capacity` and `effective_capacity`. This option does not change
+the plugin's production default or establish that all capacity slots are
+occupied simultaneously.
