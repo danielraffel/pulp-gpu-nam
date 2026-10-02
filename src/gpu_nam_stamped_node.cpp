@@ -3,16 +3,22 @@
 #include <limits>
 
 namespace pulp::examples {
-namespace {
-constexpr std::uint32_t kStampedPipelineCapacity = 16;
-}
 std::unique_ptr<GpuNamStampedNode> GpuNamStampedNode::create(
     const nam::NamModel& model, std::uint32_t channels,
     std::uint32_t frames, std::uint32_t sample_rate, std::uint32_t lead,
-    GpuNamCompletionOptions completion) {
+    GpuNamCompletionOptions completion, std::uint32_t capacity,
+    std::uint32_t max_inflight) {
     if (!completion.valid()) return {};
     if (!channels || channels > GpuNamStampedNode::kMaxNamChannels || !frames ||
-        !sample_rate || !lead || lead > 8 || model.arrays().empty()) return {};
+        !sample_rate || !lead || lead > 8 || model.arrays().empty() ||
+        capacity <= lead || capacity > 64 || max_inflight == 0 ||
+        max_inflight > capacity - lead) return {};
+#if !defined(PULP_GPU_WAVENET_MAX_INFLIGHT_API)
+    // Official SDKs before the multi-flight API retain single-flight behavior.
+    // Keep the diagnostic parser usable, but fail closed for requests that the
+    // linked provider cannot represent.
+    if (max_inflight != 1) return {};
+#endif
     const auto prewarm = model.prewarm_block_count(frames);
     if (prewarm > std::numeric_limits<std::uint32_t>::max()) return {};
     std::vector<std::vector<std::uint32_t>> dilations;
@@ -42,16 +48,19 @@ std::unique_ptr<GpuNamStampedNode> GpuNamStampedNode::create(
         .weight_count = model.weights_size()};
     config.session.weights = {model.weights_data(), model.weights_size()};
     config.session.completion_policy = completion.policy;
-    // Keep provider capacity coupled to the transport ring. Two slots can saturate
-    // before a 32-frame callback period when completion observation is slower.
-    config.session.slots = kStampedPipelineCapacity;
+    // Capacity is the persistent provider/transport slot count. It is not the
+    // number of submissions the worker is allowed to retain concurrently.
+    config.session.slots = capacity;
     // The relative worker budget is shared across channels for each pump.
     // A zero worker budget never calls the waiting service path.
     config.completion_service_wait_ns = completion.worker_wait_ns;
     config.session.completion_wait_ns = completion.worker_wait_ns;
     config.channels = channels;
     config.lead_blocks = lead;
-    config.capacity = kStampedPipelineCapacity;
+    config.capacity = capacity;
+#if defined(PULP_GPU_WAVENET_MAX_INFLIGHT_API)
+    config.max_inflight = max_inflight;
+#endif
     config.prewarm_blocks = static_cast<std::uint32_t>(prewarm);
     config.miss_policy = gpu_audio::MissPolicy::CpuFallback;
     config.supports_cpu_fallback = true;

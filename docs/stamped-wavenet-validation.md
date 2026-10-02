@@ -25,6 +25,8 @@ Append `--inject-output-error` to alter an actual delivered sample. The oracle
 must report exit 7 and a residual near 0.25. This is a failure-detector control,
 not a passing GPU case. The 512-frame case matches the plugin's internal quantum.
 
+Paced diagnostics also accept independent slot and worker-flight controls: `--capacity=2|4|8` sets the persistent provider/transport slot capacity, while `--max-inflight=1|2|4|8` sets the maximum number of submissions retained by the serialized worker. They are recorded separately in stdout receipts. The multi-flight option requires an SDK exporting `GpuWaveNetRealtimeNode::Config::max_inflight`; older installed SDKs fail closed for values greater than one rather than silently running a single-flight experiment.
+
 The SDK-owned adapter is bounded to 64 independent channels, matching `GpuWaveNetRealtimeNode`; the current GPU-NAM plugin descriptor remains stereo. `gpu-nam-stamped-multichannel-4096` is a separate four-channel, 4,096-block paced lifecycle validation. It checks CPU-oracle parity, zero misses on the quiet validation host, sustained GPU delivery, continuously advanced fallback accounting, and successful transport/session retirement.
 
 The synthetic worker receives 10 ms between blocks. This checks correctness and

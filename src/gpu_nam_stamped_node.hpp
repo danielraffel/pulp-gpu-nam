@@ -17,7 +17,8 @@ public:
     static std::unique_ptr<GpuNamStampedNode> create(
         const nam::NamModel& model, std::uint32_t channels,
         std::uint32_t block_size, std::uint32_t sample_rate,
-        std::uint32_t lead_blocks, GpuNamCompletionOptions completion = {});
+        std::uint32_t lead_blocks, GpuNamCompletionOptions completion = {},
+        std::uint32_t capacity = 16, std::uint32_t max_inflight = 1);
 
     bool prepare() override;
     void prime_fallback(const audio::BufferView<const float>& input,
