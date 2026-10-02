@@ -5,7 +5,7 @@ This receipt records the exact published ARM64 SDK consumer validation for
 
 ## Source and SDK identity
 
-- GPU NAM commit: `bdedb38018399c76e8f47801ba37226c69a12766`
+- GPU NAM validation commit: `c48c461e98b2d12c8c40157712829c64e3e1dc03`
 - Pulp submodule tag: `v0.890.2`
 - Pulp source SHA: `209c0c92274f55e33b4192137564946e8e81e55a`
 - SDK artifact: `pulp-sdk-darwin-arm64.tar.gz`
