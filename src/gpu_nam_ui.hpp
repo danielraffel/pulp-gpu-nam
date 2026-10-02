@@ -493,12 +493,15 @@ private:
                              : store_.get_value(kEngine) >= 0.5f;
         settings_engine_cpu_ = seg(canvas, rowL, cy, segW, "CPU oracle", !gpu);
         settings_engine_gpu_ = seg(canvas, rowL + segW + 14.0f, cy, segW, "GPU engine", gpu);
-        cy += 34.0f;
+        // Leave a clear breathing line below the selector before its helper
+        // text.  The helper is intentionally a separate baseline, rather than
+        // being packed against the button row at small editor scales.
+        cy += 42.0f;
         if constexpr (nam::kGpuNamPreparationBoundEngine)
             help(canvas, rowL, cy, proc_.engine_selection_status_text());
         else
             help(canvas, rowL, cy, "CPU (always available) or GPU (opt-in, bit-exact vs the CPU oracle).");
-        cy += 16.0f;
+        cy += 20.0f;
 
         // Output Mode as a full-width 3-segment row so Raw / Normalized / Calibrated
         // are all visible at once (not a cycling toggle). Make-up math lives in
@@ -510,10 +513,10 @@ private:
         settings_output_raw_  = seg(canvas, rowL,                        cy, osw, "Raw",        omode_i == 0);
         settings_output_norm_ = seg(canvas, rowL + (osw + 14.0f),        cy, osw, "Normalized", omode_i == 1);
         settings_output_cal_  = seg(canvas, rowL + 2.0f * (osw + 14.0f), cy, osw, "Calibrated", omode_i == 2);
-        cy += 34.0f;
+        cy += 42.0f;
         help(canvas, rowL, cy,
              "Raw = model level \xC2\xB7 Normalized = -18 dBFS \xC2\xB7 Calibrated needs loudness metadata.");
-        cy += 16.0f;
+        cy += 20.0f;
 
         // Bypass (left half) shares a row with the Slim size selector (right half).
         // Slim shows one segment per variant only for a packed SlimmableContainer
