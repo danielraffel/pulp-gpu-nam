@@ -557,14 +557,14 @@ private:
 
         // Bottom: Model (left) + About (right), like the reference's Model-Info /
         // About blocks.
-        // Keep the model/about block below the Bypass row.  The selector and
-        // its label occupy the preceding baseline; placing this block 20 px
-        // higher made MODEL visually collide with the Active button.
-        const float by = y + h - 54.0f;
-        section_label(canvas, rowL, by, "MODEL");
+        // Keep the headings aligned with the reference layout.  Only the
+        // model detail text needs extra room below the Bypass/Active control;
+        // moving the whole block makes the MODEL and ABOUT headings drift.
+        const float by = y + h - 74.0f;
+        section_label(canvas, rowL, by + 14.0f, "MODEL");
         canvas.set_fill_color(colors_.text);
         canvas.set_font("Roboto", ss(11.0f));
-        canvas.fill_text(proc_.model_name(), sx(rowL), sy(by + 22.0f));
+        canvas.fill_text(proc_.model_name(), sx(rowL), sy(by + 34.0f));
         canvas.set_fill_color(colors_.text_dim);
         canvas.set_font("Roboto", ss(10.0f));
         // Drive the sub-label from the loaded model's real architecture rather than
@@ -573,7 +573,7 @@ private:
         {
             const std::string arch = proc_.model_arch();
             canvas.fill_text(arch == "none" ? "no capture loaded" : arch + " capture",
-                             sx(rowL), sy(by + 38.0f));
+                             sx(rowL), sy(by + 50.0f));
         }
 
         const float ax = x + w * 0.5f + 20.0f;
