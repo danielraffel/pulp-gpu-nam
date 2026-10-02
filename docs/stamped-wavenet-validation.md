@@ -11,7 +11,7 @@ is no worker-side CPU model. The callback still computes the entire CPU model,
 so removing the worker duplicate is not a claim of CPU savings over CPU-only NAM.
 
 Build target `gpu-nam-stamped-validation`, then run CTest matching
-`gpu-nam-stamped-`. Each case checks stereo, block-aligned model prewarm,
+`gpu-nam-stamped-`. Each case checks the configured channel count (the functional matrix remains stereo), block-aligned model prewarm,
 32/64/128/512-frame blocks, fixed 1/2/4/8-block delay, exactly one callback CPU-model invocation per channel
 per block, and parity after worker servicing stops. It requires at least one
 post-priming callback without CPU fallback and correct nonzero output. Worker
@@ -24,6 +24,8 @@ fail before creating a provider.
 Append `--inject-output-error` to alter an actual delivered sample. The oracle
 must report exit 7 and a residual near 0.25. This is a failure-detector control,
 not a passing GPU case. The 512-frame case matches the plugin's internal quantum.
+
+The SDK-owned adapter is bounded to 64 independent channels, matching `GpuWaveNetRealtimeNode`; the current GPU-NAM plugin descriptor remains stereo. `gpu-nam-stamped-multichannel-4096` is a separate four-channel, 4,096-block paced lifecycle validation. It checks CPU-oracle parity, zero misses on the quiet validation host, sustained GPU delivery, continuously advanced fallback accounting, and successful transport/session retirement.
 
 The synthetic worker receives 10 ms between blocks. This checks correctness and
 selection, not realtime reliability. Installed-SDK execution, paced performance,

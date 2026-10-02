@@ -63,7 +63,7 @@ inline PreparedGpuNamEngine prepare_gpu_nam_engine(const NamModel *model,
                                                    std::uint32_t frames,
                                                    std::uint32_t sample_rate) {
   PreparedGpuNamEngine result;
-  if (!model || channels == 0 || channels > 2 || frames == 0 ||
+  if (!model || channels == 0 || channels > 64 || frames == 0 ||
       sample_rate == 0 || model->arrays().empty() ||
       model->weights_size() > std::numeric_limits<std::uint32_t>::max() ||
       model->arrays().size() > std::numeric_limits<std::uint32_t>::max())
@@ -107,10 +107,10 @@ inline PreparedGpuNamEngine prepare_gpu_nam_engine(const NamModel *model,
   program.cpu_fallback_prepared = true;
 #if defined(GPU_NAM_EXPERIMENTAL_STAMPED_WAVENET)
   // These are the immutable settings in GpuNamStampedNode::create: sixteen
-  // stamped queue records and two provider slots per mono session. Queue
+  // stamped queue records and sixteen provider slots per mono session. Queue
   // capacity is not simultaneous GPU concurrency (one group is in flight).
   program.pipeline_depth = 16;
-  program.provider_slots = 2 * channels;
+  program.provider_slots = 16 * channels;
   program.path = gpu_audio::GpuAudioExecutionPath::SharedMemory;
   program.provider = gpu_audio::GpuAudioProvider::Dawn;
   program.provider_owned_resources = true;

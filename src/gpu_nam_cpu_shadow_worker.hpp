@@ -40,7 +40,7 @@ class GpuNamCpuShadowWorker final {
         // while a prior worker can still access them.
         if (worker_.joinable())
             stop();
-        if (channels_ == 0 || channels_ > 2 || frames_ == 0 || lead_ == 0 ||
+        if (channels_ == 0 || channels_ > 64 || frames_ == 0 || lead_ == 0 ||
             capacity_ > 64 || lead_ >= capacity_ || model_.arrays().empty())
             return false;
         input_.assign(static_cast<std::size_t>(capacity_) * channels_ * frames_, 0.f);
@@ -185,7 +185,7 @@ class GpuNamCpuShadowWorker final {
     }
 
     nam::NamModel model_;
-    std::array<nam::NamModel, 2> cpu_;
+    std::array<nam::NamModel, 64> cpu_;
     std::uint32_t channels_, frames_, lead_, capacity_;
     std::vector<float> input_, output_;
     std::vector<std::uint64_t> input_sequence_;

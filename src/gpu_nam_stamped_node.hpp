@@ -6,6 +6,7 @@
 #include <array>
 #include <memory>
 #include <vector>
+#include <cstdint>
 
 namespace pulp::examples {
 
@@ -33,8 +34,9 @@ public:
 private:
     GpuNamStampedNode(const Config& config, const nam::NamModel& model);
     nam::NamModel model_;
-    std::array<nam::NamModel, 2> cpu_;
-    std::array<std::vector<float>, 2> ring_, due_;
+    static constexpr std::uint32_t kMaxNamChannels = 64;
+    std::array<nam::NamModel, kMaxNamChannels> cpu_;
+    std::array<std::vector<float>, kMaxNamChannels> ring_, due_;
     std::vector<float> zero_;
     std::uint32_t channels_, frames_, lead_, cursor_ = 0;
     std::uint64_t cpu_model_calls_ = 0, fallback_reads_ = 0;

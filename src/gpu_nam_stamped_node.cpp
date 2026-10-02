@@ -11,8 +11,8 @@ std::unique_ptr<GpuNamStampedNode> GpuNamStampedNode::create(
     std::uint32_t frames, std::uint32_t sample_rate, std::uint32_t lead,
     GpuNamCompletionOptions completion) {
     if (!completion.valid()) return {};
-    if (!channels || channels > 2 || !frames || !sample_rate || !lead || lead > 8 ||
-        model.arrays().empty()) return {};
+    if (!channels || channels > GpuNamStampedNode::kMaxNamChannels || !frames ||
+        !sample_rate || !lead || lead > 8 || model.arrays().empty()) return {};
     const auto prewarm = model.prewarm_block_count(frames);
     if (prewarm > std::numeric_limits<std::uint32_t>::max()) return {};
     std::vector<std::vector<std::uint32_t>> dilations;

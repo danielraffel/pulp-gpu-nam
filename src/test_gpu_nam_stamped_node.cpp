@@ -60,7 +60,7 @@ int main(int argc, char** argv) {
         if (paced.trace && !pulp::runtime::Tracing::stop().ok) return 8;
         return result;
     }
-    if (examples::GpuNamStampedNode::create(model, 3, frames, 48000, lead) ||
+    if (examples::GpuNamStampedNode::create(model, 65, frames, 48000, lead) ||
         examples::GpuNamStampedNode::create(model, channels, frames, 48000, 0)) return 2;
     auto node = examples::GpuNamStampedNode::create(model, channels, frames, 48000, lead, completion);
     if (!node) return 3;
