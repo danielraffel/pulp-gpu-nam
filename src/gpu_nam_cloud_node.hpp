@@ -18,6 +18,7 @@
 // when the worker falls behind or no device exists.
 
 #include "gpu_nam.hpp"
+#include "gpu_nam_prepared_program.hpp"
 #include "nam_model.hpp"
 
 #include <algorithm>
@@ -32,7 +33,7 @@
 
 namespace pulp::examples {
 
-inline constexpr std::uint32_t kNamChannels = 2;
+inline constexpr std::uint32_t kNamChannels = 64;
 
 class GpuNamCloudNode : public gpu_audio::GpuAudioNode {
 public:
@@ -64,6 +65,7 @@ public:
     // processor routes the inline CPU engine) if no device is available or the
     // model shape is unsupported on the GPU.
     bool prepare() override {
+        prepared_program_ = {};
         if (!model_ || channels_ == 0 || channels_ > kNamChannels) return false;
         fallback_write_slot_ = 0;
         for (auto& slots : fallback_slots_)
@@ -93,7 +95,26 @@ public:
             cpu_[ch].prewarm();
             fallback_slots_[ch].assign(kFallbackRingBlocks * block_size_, 0.0f);
         }
+        prepared_program_.kind = nam::GpuNamProgramKind::WaveNet;
+        prepared_program_.channels = channels_;
+        prepared_program_.block_size = block_size_;
+        prepared_program_.sample_rate = sample_rate_;
+        prepared_program_.model_layers = static_cast<std::uint32_t>(model_->arrays().size());
+        prepared_program_.model_weights = static_cast<std::uint32_t>(model_->weights_size());
+        prepared_program_.receptive_field = static_cast<std::uint32_t>(model_->receptive_field());
+        prepared_program_.algorithmic_lead_blocks = nam::GpuNamPreparedProgram::kPreparedLeadBlocks;
+        prepared_program_.pipeline_depth = nam::GpuNamPreparedProgram::kPreparedPipelineDepth;
+        prepared_program_.provider_slots = channels_;
+        prepared_program_.path = gpu_audio::GpuAudioExecutionPath::Staged;
+        prepared_program_.provider = gpu_audio::GpuAudioProvider::Unknown;
+        prepared_program_.miss_policy = gpu_audio::MissPolicy::CpuFallback;
+        prepared_program_.provider_owned_resources = false;
+        prepared_program_.cpu_fallback_prepared = true;
         return true;
+    }
+
+    const nam::GpuNamPreparedProgram& prepared_program() const noexcept {
+        return prepared_program_;
     }
 
     bool gpu_available() const {
@@ -182,6 +203,7 @@ private:
     std::unique_ptr<render::GpuCompute> shared_gpu_;
     std::array<nam::GpuNam, kNamChannels> gpu_{};
     std::array<nam::NamModel, kNamChannels> cpu_{};  // CpuFallback oracle (per channel)
+    nam::GpuNamPreparedProgram prepared_program_{};
     static constexpr std::uint32_t kFallbackRingBlocks = 2;
     std::array<std::vector<float>, kNamChannels> fallback_slots_{};
     std::uint32_t fallback_write_slot_ = 0;
