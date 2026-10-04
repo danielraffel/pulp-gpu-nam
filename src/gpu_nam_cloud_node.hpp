@@ -6,9 +6,8 @@
 // It wraps one GpuNam per channel, all sharing ONE compute device: the WaveNet
 // plans are keyed by (block_size, instance), so each channel gets its own plan
 // slot (instance = channel) and its own dilation history on the shared device.
-// Multichannel instances therefore share one Dawn device + one weight/pipeline set
-// instead of creating one device per channel. It runs as a GpuAudioNode on the
-// transport's non-real-time worker.
+// Stereo therefore costs one Dawn device + one weight/pipeline set instead of
+// two. It runs as a GpuAudioNode on the transport's non-real-time worker.
 // process_block() runs the GPU forward for exactly one fixed block per channel;
 // the mono NAM model is applied independently to each channel.
 //
@@ -19,9 +18,9 @@
 // when the worker falls behind or no device exists.
 
 #include "gpu_nam.hpp"
-#include "gpu_nam_prepared_program.hpp"
 #include "nam_model.hpp"
 
+#include <algorithm>
 #include <pulp/audio/buffer.hpp>
 #include <pulp/gpu_audio/gpu_audio_node.hpp>
 
@@ -33,7 +32,7 @@
 
 namespace pulp::examples {
 
-inline constexpr std::uint32_t kNamChannels = 64;
+inline constexpr std::uint32_t kNamChannels = 2;
 
 class GpuNamCloudNode : public gpu_audio::GpuAudioNode {
 public:
@@ -65,8 +64,10 @@ public:
     // processor routes the inline CPU engine) if no device is available or the
     // model shape is unsupported on the GPU.
     bool prepare() override {
-        prepared_program_ = {};
         if (!model_ || channels_ == 0 || channels_ > kNamChannels) return false;
+        fallback_write_slot_ = 0;
+        for (auto& slots : fallback_slots_)
+            slots.clear();
         // One device for all channels. If it can't be created, fail closed so the
         // processor routes the inline CPU engine (same contract as before).
         shared_gpu_ = render::GpuCompute::create();
@@ -90,35 +91,38 @@ public:
             // fallback never resizes on the audio thread).
             cpu_[ch] = *model_;
             cpu_[ch].prewarm();
+            fallback_slots_[ch].assign(kFallbackRingBlocks * block_size_, 0.0f);
         }
-        // This is metadata for the prepared staged path.  It deliberately
-        // does not claim shared-memory execution or expose backend objects.
-        prepared_program_.kind = nam::GpuNamProgramKind::WaveNet;
-        prepared_program_.channels = channels_;
-        prepared_program_.block_size = block_size_;
-        prepared_program_.sample_rate = sample_rate_;
-        prepared_program_.model_layers = static_cast<std::uint32_t>(model_->arrays().size());
-        prepared_program_.model_weights = static_cast<std::uint32_t>(model_->weights_size());
-        prepared_program_.receptive_field = static_cast<std::uint32_t>(model_->receptive_field());
-        prepared_program_.algorithmic_lead_blocks = nam::GpuNamPreparedProgram::kPreparedLeadBlocks;
-        prepared_program_.pipeline_depth = nam::GpuNamPreparedProgram::kPreparedPipelineDepth;
-        prepared_program_.provider_slots = channels_;
-        prepared_program_.path = gpu_audio::GpuAudioExecutionPath::Staged;
-        prepared_program_.provider = gpu_audio::GpuAudioProvider::Unknown;
-        prepared_program_.miss_policy = gpu_audio::MissPolicy::CpuFallback;
-        prepared_program_.provider_owned_resources = false;
-        prepared_program_.cpu_fallback_prepared = true;
         return true;
-    }
-
-    /// Host-side preparation metadata.  This remains valid until the next
-    /// prepare() call and contains no provider handles or executable state.
-    const nam::GpuNamPreparedProgram& prepared_program() const noexcept {
-        return prepared_program_;
     }
 
     bool gpu_available() const {
         return channels_ > 0 && shared_gpu_ != nullptr;
+    }
+
+    // RT-safe: keep the CPU shadow one block ahead of any possible miss.  The
+    // transport calls this for every block, including blocks that the GPU
+    // delivers successfully.  A fallback must therefore return the
+    // latency-aligned shadow result, rather than processing the current input
+    // again from a model that only advanced on earlier misses.
+    void prime_fallback(const audio::BufferView<const float>& input,
+                        std::uint32_t n) noexcept override {
+        const std::uint32_t ch_count =
+            input.num_channels() < channels_
+                ? static_cast<std::uint32_t>(input.num_channels())
+                : channels_;
+        for (std::uint32_t ch = 0; ch < ch_count; ++ch) {
+            const float* in = input.channel_ptr(ch);
+            float* staged = fallback_slots_[ch].data() +
+                            fallback_write_slot_ * block_size_;
+            cpu_[ch].process(in, staged, n);
+        }
+        for (std::uint32_t ch = ch_count; ch < channels_; ++ch) {
+            float* staged = fallback_slots_[ch].data() +
+                            fallback_write_slot_ * block_size_;
+            std::fill_n(staged, n, 0.0f);
+        }
+        fallback_write_slot_ = (fallback_write_slot_ + 1) % kFallbackRingBlocks;
     }
     std::string backend() const {
         if (channels_ == 0 || shared_gpu_ == nullptr) return std::string();
@@ -159,14 +163,12 @@ public:
                 ? static_cast<std::uint32_t>(output.num_channels())
                 : channels_;
         for (std::uint32_t ch = 0; ch < ch_count; ++ch) {
-            const float* in = ch < input.num_channels() ? input.channel_ptr(ch) : nullptr;
             float* out = output.channel_ptr(ch);
-            if (in == nullptr) {
-                for (std::uint32_t i = 0; i < n; ++i) out[i] = 0.0f;
-                continue;
-            }
-            cpu_[ch].process(in, out, n);
+            const float* staged = fallback_slots_[ch].data() +
+                                  fallback_write_slot_ * block_size_;
+            std::copy_n(staged, n, out);
         }
+        (void)input;
     }
 
 private:
@@ -180,7 +182,9 @@ private:
     std::unique_ptr<render::GpuCompute> shared_gpu_;
     std::array<nam::GpuNam, kNamChannels> gpu_{};
     std::array<nam::NamModel, kNamChannels> cpu_{};  // CpuFallback oracle (per channel)
-    nam::GpuNamPreparedProgram prepared_program_{};
+    static constexpr std::uint32_t kFallbackRingBlocks = 2;
+    std::array<std::vector<float>, kNamChannels> fallback_slots_{};
+    std::uint32_t fallback_write_slot_ = 0;
 };
 
 } // namespace pulp::examples
