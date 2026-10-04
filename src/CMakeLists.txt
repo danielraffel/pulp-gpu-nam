@@ -318,10 +318,10 @@ if(TARGET pulp::render AND TARGET pulp::gpu-audio)
         target_include_directories(GpuNam_Core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
         target_link_libraries(GpuNam_Core PUBLIC
             pulp::render pulp::gpu-audio pulp::signal pulp::view pulp::canvas pulp::runtime)
-        # Source-tree asset fallback for dev/standalone runs from the build tree;
-        # shipped bundles resolve the executable-relative Resources/assets/nam copy.
-        target_compile_definitions(GpuNam_Core PRIVATE
-            GPU_NAM_ASSET_DIR="${GPU_NAM_ASSETS}")
+        # Shipped formats must resolve assets from their executable-relative
+        # Resources copy. Keep the shared plugin core free of a source-tree
+        # absolute path; development-only tools below provide their own
+        # GPU_NAM_ASSET_DIR fallback when they run outside a bundle.
     endif()
 
     # Bundle the default model into each format's Resources so the plugin finds it
