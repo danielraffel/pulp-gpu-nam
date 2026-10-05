@@ -1,0 +1,35 @@
+-- The C compiler identification is AppleClang 21.0.0.21000334
+-- The CXX compiler identification is AppleClang 21.0.0.21000334
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /usr/bin/cc - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/c++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- The OBJC compiler identification is AppleClang 21.0.0.21000334
+-- Detecting OBJC compiler ABI info
+-- Detecting OBJC compiler ABI info - done
+-- Check for working OBJC compiler: /usr/bin/clang - skipped
+-- The OBJCXX compiler identification is AppleClang 21.0.0.21000334
+-- Detecting OBJCXX compiler ABI info
+-- Detecting OBJCXX compiler ABI info - done
+-- Check for working OBJCXX compiler: /usr/bin/clang++ - skipped
+-- Pulp min-OS: macOS deployment target = 13.4 (max of: skia;dawn;libcxx)
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD - Success
+-- Found Threads: TRUE
+-- Pulp macOS archive floor: 13.0 <= 13.4 (/Users/danielraffel/Code/pulp-sdk-v0.913.1-arm64/pulp-sdk/external/skia-build/build/mac-gpu/lib/Release/libskia.a)
+-- Pulp macOS archive floor: 13.0 <= 13.4 (/Users/danielraffel/Code/pulp-sdk-v0.913.1-arm64/pulp-sdk/external/skia-build/build/mac-gpu/lib/Release/libdawn_combined.a)
+-- Skia: found at /Users/danielraffel/Code/pulp-sdk-v0.913.1-arm64/pulp-sdk/external/skia-build (mac)
+-- GPU NAM: building against installed Pulp SDK 0.913.1 (/Users/danielraffel/Code/pulp-sdk-v0.913.1-arm64/pulp-sdk/lib/cmake/Pulp)
+-- Performing Test HAVE_FLAG__ffile_prefix_map__Users_danielraffel_Code_gpu_nam_sdk09131_preflight_20261005_build_sdk09131_r1__deps_catch2_src__
+-- Performing Test HAVE_FLAG__ffile_prefix_map__Users_danielraffel_Code_gpu_nam_sdk09131_preflight_20261005_build_sdk09131_r1__deps_catch2_src__ - Success
+-- Pulp plugin: GpuNam (formats: VST3;CLAP;AU;Standalone)
+-- Found Python3: /opt/homebrew/Frameworks/Python.framework/Versions/3.14/bin/python3.14 (found version "3.14.7") found components: Interpreter
+-- Configuring done (8.0s)
+-- Generating done (0.1s)
+-- Build files have been written to: /Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1

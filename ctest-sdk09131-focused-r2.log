@@ -1,0 +1,19 @@
+Test project /Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1
+    Start  1: gpu-nam-sdk-contract
+1/7 Test  #1: gpu-nam-sdk-contract ......................................................   Passed    0.12 sec
+    Start 30: GPU NAM stamped engine requests preserve active history until reprepare
+2/7 Test #30: GPU NAM stamped engine requests preserve active history until reprepare ...   Passed   12.16 sec
+    Start 47: gpu-nam-completion-options
+3/7 Test #47: gpu-nam-completion-options ................................................   Passed    0.01 sec
+    Start 48: gpu-nam-paced-options
+4/7 Test #48: gpu-nam-paced-options .....................................................   Passed    0.00 sec
+    Start 69: gpu-nam-delivery-status
+5/7 Test #69: gpu-nam-delivery-status ...................................................   Passed    0.12 sec
+    Start 70: gpu-nam-physical-lifecycle-contract
+6/7 Test #70: gpu-nam-physical-lifecycle-contract .......................................   Passed    0.12 sec
+    Start 71: gpu-nam-physical-watchdog-contract
+7/7 Test #71: gpu-nam-physical-watchdog-contract ........................................   Passed    0.14 sec
+
+100% tests passed out of 7
+
+Total Test time (real) =  12.67 sec

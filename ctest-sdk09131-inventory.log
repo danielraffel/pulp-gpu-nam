@@ -1,0 +1,196 @@
+Test project /Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1
+  Test  #1: gpu-nam-sdk-contract
+  Test  #2: GPU NAM CPU engine produces finite non-trivial amped output
+  Test  #3: GPU NAM bypass passes the dry signal
+  Test  #4: GPU NAM GPU engine reproduces the CPU engine
+  Test  #5: GPU NAM GPU engine keeps stereo channels independent on the shared device
+  Test  #6: GPU NAM Engine=Auto resolves once at prepare and the choice takes effect
+  Test  #7: GPU NAM dual-mono fast path stays bit-exact through channel divergence
+  Test  #8: GPU NAM CPU-only path reports zero latency and matches the re-block path
+  Test  #9: GPU NAM direct path shares one inference and stays bit-exact on divergence
+  Test #10: GPU NAM noise gate attenuates a sub-threshold signal
+  Test #11: GPU NAM EQ is transparent when flat and shapes tone when boosted
+  Test #12: GPU NAM Normalize retargets output to the model loudness
+  Test #13: GPU NAM Calibrated retargets to the user reference level
+  Test #14: GPU NAM resamples around an off-rate host
+  Test #15: GPU NAM cabinet swap is click-free
+  Test #16: GPU NAM survives rapid consecutive cabinet swaps
+  Test #17: GPU NAM crossfade never blends an IR engine against itself
+  Test #18: GPU NAM amps identically under any host block size
+  Test #19: GPU NAM applies a loaded cabinet IR
+  Test #20: GPU NAM load_model rebuilds without NaNs
+  Test #21: Wet output DC offset is removed
+  Test #22: GPU NAM file browse: list_files filters by extension, sorted
+  Test #23: GPU NAM file browse: neighbor cycles and wraps
+  Test #24: GPU NAM clear resets the model + IR slots
+  Test #25: GPU NAM streams real model captures end-to-end
+  Test #26: GPU NAM streams a real IR end-to-end
+  Test #27: GPU NAM streams ConvNet and Linear captures end-to-end
+  Test #28: GPU NAM Slim size selects a SlimmableContainer variant end to end
+  Test #29: GPU NAM defaults Output Mode to Normalized and Slim to Lite (parity with NAM)
+  Test #30: GPU NAM stamped engine requests preserve active history until reprepare
+Could not find executable gpu-nam-ui-test_NOT_BUILT-b12d07c
+Looked in the following places:
+gpu-nam-ui-test_NOT_BUILT-b12d07c
+gpu-nam-ui-test_NOT_BUILT-b12d07c
+Release/gpu-nam-ui-test_NOT_BUILT-b12d07c
+Release/gpu-nam-ui-test_NOT_BUILT-b12d07c
+Debug/gpu-nam-ui-test_NOT_BUILT-b12d07c
+Debug/gpu-nam-ui-test_NOT_BUILT-b12d07c
+MinSizeRel/gpu-nam-ui-test_NOT_BUILT-b12d07c
+MinSizeRel/gpu-nam-ui-test_NOT_BUILT-b12d07c
+RelWithDebInfo/gpu-nam-ui-test_NOT_BUILT-b12d07c
+RelWithDebInfo/gpu-nam-ui-test_NOT_BUILT-b12d07c
+Deployment/gpu-nam-ui-test_NOT_BUILT-b12d07c
+Deployment/gpu-nam-ui-test_NOT_BUILT-b12d07c
+Development/gpu-nam-ui-test_NOT_BUILT-b12d07c
+Development/gpu-nam-ui-test_NOT_BUILT-b12d07c
+  Test #31: gpu-nam-ui-test_NOT_BUILT-b12d07c
+Could not find executable /Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/gpu-nam-gpu-cpu-diagnostic-options-test
+Looked in the following places:
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/gpu-nam-gpu-cpu-diagnostic-options-test
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/gpu-nam-gpu-cpu-diagnostic-options-test
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Release/gpu-nam-gpu-cpu-diagnostic-options-test
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Release/gpu-nam-gpu-cpu-diagnostic-options-test
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Debug/gpu-nam-gpu-cpu-diagnostic-options-test
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Debug/gpu-nam-gpu-cpu-diagnostic-options-test
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/MinSizeRel/gpu-nam-gpu-cpu-diagnostic-options-test
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/MinSizeRel/gpu-nam-gpu-cpu-diagnostic-options-test
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/RelWithDebInfo/gpu-nam-gpu-cpu-diagnostic-options-test
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/RelWithDebInfo/gpu-nam-gpu-cpu-diagnostic-options-test
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Deployment/gpu-nam-gpu-cpu-diagnostic-options-test
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Deployment/gpu-nam-gpu-cpu-diagnostic-options-test
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Development/gpu-nam-gpu-cpu-diagnostic-options-test
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Development/gpu-nam-gpu-cpu-diagnostic-options-test
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/gpu-nam-gpu-cpu-diagnostic-options-test
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/gpu-nam-gpu-cpu-diagnostic-options-test
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Release/gpu-nam-gpu-cpu-diagnostic-options-test
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Release/gpu-nam-gpu-cpu-diagnostic-options-test
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Debug/gpu-nam-gpu-cpu-diagnostic-options-test
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Debug/gpu-nam-gpu-cpu-diagnostic-options-test
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/MinSizeRel/gpu-nam-gpu-cpu-diagnostic-options-test
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/MinSizeRel/gpu-nam-gpu-cpu-diagnostic-options-test
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/RelWithDebInfo/gpu-nam-gpu-cpu-diagnostic-options-test
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/RelWithDebInfo/gpu-nam-gpu-cpu-diagnostic-options-test
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Deployment/gpu-nam-gpu-cpu-diagnostic-options-test
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Deployment/gpu-nam-gpu-cpu-diagnostic-options-test
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Development/gpu-nam-gpu-cpu-diagnostic-options-test
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Development/gpu-nam-gpu-cpu-diagnostic-options-test
+  Test #32: gpu-nam-gpu-cpu-diagnostic-options
+Could not find executable /Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/gpu-nam-test
+Looked in the following places:
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/gpu-nam-test
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/gpu-nam-test
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Release/gpu-nam-test
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Release/gpu-nam-test
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Debug/gpu-nam-test
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Debug/gpu-nam-test
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/MinSizeRel/gpu-nam-test
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/MinSizeRel/gpu-nam-test
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/RelWithDebInfo/gpu-nam-test
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/RelWithDebInfo/gpu-nam-test
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Deployment/gpu-nam-test
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Deployment/gpu-nam-test
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Development/gpu-nam-test
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Development/gpu-nam-test
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/gpu-nam-test
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/gpu-nam-test
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Release/gpu-nam-test
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Release/gpu-nam-test
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Debug/gpu-nam-test
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Debug/gpu-nam-test
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/MinSizeRel/gpu-nam-test
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/MinSizeRel/gpu-nam-test
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/RelWithDebInfo/gpu-nam-test
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/RelWithDebInfo/gpu-nam-test
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Deployment/gpu-nam-test
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Deployment/gpu-nam-test
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Development/gpu-nam-test
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Development/gpu-nam-test
+  Test #33: gpu-nam-test
+Could not find executable /Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/gpu-nam-gpu-test
+Looked in the following places:
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/gpu-nam-gpu-test
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/gpu-nam-gpu-test
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Release/gpu-nam-gpu-test
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Release/gpu-nam-gpu-test
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Debug/gpu-nam-gpu-test
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Debug/gpu-nam-gpu-test
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/MinSizeRel/gpu-nam-gpu-test
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/MinSizeRel/gpu-nam-gpu-test
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/RelWithDebInfo/gpu-nam-gpu-test
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/RelWithDebInfo/gpu-nam-gpu-test
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Deployment/gpu-nam-gpu-test
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Deployment/gpu-nam-gpu-test
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Development/gpu-nam-gpu-test
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Development/gpu-nam-gpu-test
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/gpu-nam-gpu-test
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/gpu-nam-gpu-test
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Release/gpu-nam-gpu-test
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Release/gpu-nam-gpu-test
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Debug/gpu-nam-gpu-test
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Debug/gpu-nam-gpu-test
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/MinSizeRel/gpu-nam-gpu-test
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/MinSizeRel/gpu-nam-gpu-test
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/RelWithDebInfo/gpu-nam-gpu-test
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/RelWithDebInfo/gpu-nam-gpu-test
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Deployment/gpu-nam-gpu-test
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Deployment/gpu-nam-gpu-test
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Development/gpu-nam-gpu-test
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Development/gpu-nam-gpu-test
+  Test #34: gpu-nam-gpu-test
+Could not find executable /Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/gpu-nam-gpu-audio-capability-probe
+Looked in the following places:
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/gpu-nam-gpu-audio-capability-probe
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/gpu-nam-gpu-audio-capability-probe
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Release/gpu-nam-gpu-audio-capability-probe
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Release/gpu-nam-gpu-audio-capability-probe
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Debug/gpu-nam-gpu-audio-capability-probe
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Debug/gpu-nam-gpu-audio-capability-probe
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/MinSizeRel/gpu-nam-gpu-audio-capability-probe
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/MinSizeRel/gpu-nam-gpu-audio-capability-probe
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/RelWithDebInfo/gpu-nam-gpu-audio-capability-probe
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/RelWithDebInfo/gpu-nam-gpu-audio-capability-probe
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Deployment/gpu-nam-gpu-audio-capability-probe
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Deployment/gpu-nam-gpu-audio-capability-probe
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Development/gpu-nam-gpu-audio-capability-probe
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Development/gpu-nam-gpu-audio-capability-probe
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/gpu-nam-gpu-audio-capability-probe
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/gpu-nam-gpu-audio-capability-probe
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Release/gpu-nam-gpu-audio-capability-probe
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Release/gpu-nam-gpu-audio-capability-probe
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Debug/gpu-nam-gpu-audio-capability-probe
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Debug/gpu-nam-gpu-audio-capability-probe
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/MinSizeRel/gpu-nam-gpu-audio-capability-probe
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/MinSizeRel/gpu-nam-gpu-audio-capability-probe
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/RelWithDebInfo/gpu-nam-gpu-audio-capability-probe
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/RelWithDebInfo/gpu-nam-gpu-audio-capability-probe
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Deployment/gpu-nam-gpu-audio-capability-probe
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Deployment/gpu-nam-gpu-audio-capability-probe
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Development/gpu-nam-gpu-audio-capability-probe
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Development/gpu-nam-gpu-audio-capability-probe
+  Test #35: gpu-nam-gpu-audio-capability-probe
+Could not find executable /Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/gpu-nam-model-test
+Looked in the following places:
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/gpu-nam-model-test
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/gpu-nam-model-test
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Release/gpu-nam-model-test
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Release/gpu-nam-model-test
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Debug/gpu-nam-model-test
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Debug/gpu-nam-model-test
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/MinSizeRel/gpu-nam-model-test
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/MinSizeRel/gpu-nam-model-test
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/RelWithDebInfo/gpu-nam-model-test
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/RelWithDebInfo/gpu-nam-model-test
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Deployment/gpu-nam-model-test
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Deployment/gpu-nam-model-test
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Development/gpu-nam-model-test
+/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Development/gpu-nam-model-test
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/gpu-nam-model-test
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/gpu-nam-model-test
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Release/gpu-nam-model-test
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Release/gpu-nam-model-test
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Debug/gpu-nam-model-test
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/Debug/gpu-nam-model-test
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/MinSizeRel/gpu-nam-model-test
+Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/MinSizeRel/gpu-nam-model-test

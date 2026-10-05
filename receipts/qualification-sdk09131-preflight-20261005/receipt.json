@@ -1,0 +1,76 @@
+{
+  "schema": "pulp.gpu-nam.sdk09131.preflight.v1",
+  "recorded_at_utc": "2026-10-05T17:19:16Z",
+  "result": "blocked_fail_closed",
+  "campaign_started": false,
+  "campaign_product_proof": false,
+  "provider_auth_not_attempted": true,
+  "reason_codes": [
+    "quiet_host_gate_failed",
+    "provider_campaign_not_started"
+  ],
+  "worktree": {
+    "path": "/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005",
+    "head": "eace9bfc17d8518a0be7334eb48e5b549dcf9628",
+    "branch": "qualification/sdk09131-preflight-20261005",
+    "status": "source_clean_before_receipt",
+    "receipt_artifacts_untracked_at_capture": true
+  },
+  "pulp_sdk": {
+    "version": "0.913.1",
+    "source_git_sha": "48fd1693e582d8bde88d74ddc7d07760d0385ae1",
+    "source_git_dirty": false,
+    "distribution_eligible": true,
+    "platform": "darwin-arm64",
+    "archive_sha256": "caddda509bbd6cd167a3d7331ea52d79ea997be39eec3331c3d13bc9c222a2f9",
+    "provenance_path": "/Users/danielraffel/Code/pulp-sdk-v0.913.1-arm64/pulp-sdk/sdk-provenance.json",
+    "files": {
+      "lib/cmake/Pulp/PulpConfig.cmake": {
+        "expected": "74c1b85fbffb7d9f6d7c4b8decbf830f2a2912c2dccf4d5e25a38aa93b666249",
+        "actual": "74c1b85fbffb7d9f6d7c4b8decbf830f2a2912c2dccf4d5e25a38aa93b666249",
+        "match": true
+      },
+      "lib/libpulp-gpu-audio.a": {
+        "expected": "fab168c5c7a5551b67ca22183c9643954e110e8b17aa44aa9c181223b6fc61d3",
+        "actual": "fab168c5c7a5551b67ca22183c9643954e110e8b17aa44aa9c181223b6fc61d3",
+        "match": true
+      },
+      "include/pulp/view/widget_bridge.hpp": {
+        "expected": "8b338e5932caed3422b1654a3a36235c27be702a3decf6aef76701f565e16441",
+        "actual": "8b338e5932caed3422b1654a3a36235c27be702a3decf6aef76701f565e16441",
+        "match": true
+      },
+      "lib/libpulp-view-script.a": {
+        "expected": "3779dbb7e53021efc6acf8c5a2caa7722eccc89ef01d84ce0708ca3f61d1b786",
+        "actual": "3779dbb7e53021efc6acf8c5a2caa7722eccc89ef01d84ce0708ca3f61d1b786",
+        "match": true
+      }
+    },
+    "gpu_audio_capabilities": {
+      "exact_provider_proof": true,
+      "shared_convolver": true,
+      "shared_provider": true
+    }
+  },
+  "validation": {
+    "configure": "passed",
+    "build": "passed 136/136",
+    "ctest": "passed 7/7",
+    "build_dir": "/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1",
+    "configure_log": "/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/configure-sdk09131-r1.log",
+    "build_log": "/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1.log",
+    "ctest_log": "/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/ctest-sdk09131-focused-r2.log"
+  },
+  "quiet_host_gate": {
+    "passed": false,
+    "load_class": "high",
+    "evidence_path": "/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/receipts/qualification-sdk09131-preflight-20261005/contention-state.txt",
+    "required_action": "stop Virtualization/Android/Tart/indexing workloads and recapture thermal/power/memory/GPU identity before provider campaign"
+  },
+  "next_packet": [
+    "reserve quiet arm64 host",
+    "run stamped provider-authenticated max_inflight=1 and 4 under matched model/block/lead/completion policy",
+    "retain raw callback disposition and lifecycle/retirement identity receipts",
+    "do not issue product/default-on verdict from this preflight"
+  ]
+}

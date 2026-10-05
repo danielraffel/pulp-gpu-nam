@@ -1,0 +1,6 @@
+[governed-build] lease acquired id=pulp-shipyard-local-49190-1791220619 cores=6 (host profile)
+[governed-build] heartbeat every 60s for lease id=pulp-shipyard-local-49190-1791220619
+[1/4] Building CXX object src/CMakeFiles/gpu-nam-physical-lifecycle-test.dir/test_gpu_nam_physical_lifecycle.cpp.o
+[2/4] Building CXX object src/CMakeFiles/gpu-nam-delivery-status-test.dir/test_gpu_nam_delivery_status.cpp.o
+[3/4] Linking CXX executable src/gpu-nam-physical-lifecycle-test
+[4/4] Linking CXX executable src/gpu-nam-delivery-status-test

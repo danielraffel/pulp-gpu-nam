@@ -1,0 +1,6 @@
+contention_snapshot_schema=process-identity-only.v1
+assessment=host_not_quiet
+- class=virtualization_vm; observed_count=3
+- class=android_emulator; observed_count=2
+- class=tart_ci; observed_count=14
+- class=macos_indexing; observed_count=7
