@@ -1,0 +1,5 @@
+pwd=/Users/danielraffel/Code/gpu-nam-qualification-20261005
+head=eace9bfc17d8518a0be7334eb48e5b549dcf9628
+branch=submodule_gitlink=9cc65128d0680b55ffeeafc351e2ce59b73c85cb
+submodule_present=false
+status=?? receipts/qualification-20261005/git-state.txt;

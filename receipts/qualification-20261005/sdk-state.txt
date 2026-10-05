@@ -1,0 +1,11 @@
+SDK/provenance search under /Users/danielraffel/Code, /private/tmp, /tmp
+/Users/danielraffel/Code/spectr-sdk-0884/unpack/pulp-sdk/sdk-provenance.json
+/Users/danielraffel/Code/spectr-sdk-0884/pulp-sdk-darwin-arm64.tar.gz
+/private/tmp/pulp-sdk-0907/pulp-sdk/sdk-provenance.json
+/private/tmp/pulp-sdk-0907/pulp-sdk-darwin-arm64.tar.gz
+/private/tmp/pulp-sdk-0906/pulp-sdk/sdk-provenance.json
+/private/tmp/pulp-sdk-0906/pulp-sdk-darwin-arm64.tar.gz
+PulpConfig search
+tool availability
+pulp
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/metal
