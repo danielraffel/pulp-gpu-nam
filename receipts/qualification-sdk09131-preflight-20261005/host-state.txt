@@ -1,0 +1,7 @@
+host_snapshot_schema=quiet-gate-minimal.v1
+architecture=arm64
+os=macOS 27.0.1
+load_class=high
+quiet_host_gate=failed
+thermal=Note: No thermal warning level has been recorded Note: No performance warning level has been recorded Note: No CPU power status has been recorded 
+power=Now drawing from 'AC Power' 

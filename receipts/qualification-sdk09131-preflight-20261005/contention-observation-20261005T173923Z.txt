@@ -1,0 +1,12 @@
+contention_snapshot_schema=process-identity-only.v1
+observed_at=2026-10-05T17:39:23Z
+assessment=host_not_quiet
+load=16.03 20.20 19.06
+- class=virtualization_vm; observed_count=2
+- class=android_emulator; observed_count=1
+- class=tart_ci; observed_count=5
+- class=macos_indexing; observed_count=5
+- class=window_server; observed_count=1
+- class=high_cpu_indexer; max_mds_stores_cpu=174.3
+fleet_status=on True None
+lease_release=already_reclaimed_after_probe_shell_exit

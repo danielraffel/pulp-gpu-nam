@@ -1,0 +1,6 @@
+validation_schema=gpu-nam-sdk09131-preflight.v1
+configure=passed
+build_targets=passed:136/136
+focused_ctest=passed:7/7
+provider_campaign=not_started
+reason=quiet_host_gate_failed

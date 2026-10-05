@@ -1,0 +1,6 @@
+git_state_schema=gpu-nam-sdk09131-preflight.v1
+worktree=/Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005
+head=eace9bfc17d8518a0be7334eb48e5b549dcf9628
+branch=qualification/sdk09131-preflight-20261005
+status=?? build-sdk09131-contract-additional.log;?? build-sdk09131-r1.log;?? configure-sdk09131-r1.log;?? ctest-sdk09131-focused-r2.log;?? ctest-sdk09131-focused.log;?? ctest-sdk09131-inventory.log;?? receipts/qualification-sdk09131-preflight-20261005/
+pulp_submodule_gitlink=9cc65128d0680b55ffeeafc351e2ce59b73c85cb

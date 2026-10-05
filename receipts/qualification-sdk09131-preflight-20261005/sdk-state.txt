@@ -1,0 +1,13 @@
+sdk_state_schema=pulp.sdk-provenance.v1
+sdk_prefix=/Users/danielraffel/Code/pulp-sdk-v0.913.1-arm64/pulp-sdk
+sdk_archive=/Users/danielraffel/Code/pulp-sdk-v0.913.1-darwin-arm64.tar.gz
+sdk_archive_sha256=caddda509bbd6cd167a3d7331ea52d79ea997be39eec3331c3d13bc9c222a2f9
+source_sha=48fd1693e582d8bde88d74ddc7d07760d0385ae1
+sdk_version=0.913.1
+source_git_dirty=False
+distribution_eligible=True
+provider_exact=True
+shared_provider=True
+shared_convolver=True
+pulp_config_sha256=74c1b85fbffb7d9f6d7c4b8decbf830f2a2912c2dccf4d5e25a38aa93b666249
+gpu_audio_archive_sha256=fab168c5c7a5551b67ca22183c9643954e110e8b17aa44aa9c181223b6fc61d3

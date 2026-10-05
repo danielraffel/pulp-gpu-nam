@@ -1,0 +1,269 @@
+/Users/danielraffel/Code/pulp/tools/ci/governed-build.sh: line 461: printf: write error: Broken pipe
+[governed-build] lease denied, no capacity reported — proceeding leaseless at -j2 (floor)
+[governed-build] denial detail: used_cores=18/26 non_gate_available=0 holders=3
+[governed-build]   holder id=vm-tart-macos-vm-m5studio-pulp-gate-slot2-02-9844-42 kind=tart-macos-vm cores=8 owner=unknown@Daniels-M5-Studio pid=9844 alive=yes created=2026-10-05T17:09:05Z
+[governed-build]   holder id=pulp-shipyard-local-50034-1791220454 kind=shipyard-local cores=10 owner=governed-build pid=50034 alive=yes created=2026-10-05T17:14:14Z
+[governed-build]   holder id=pulp-shipyard-local-61965-1791220470 kind=shipyard-local cores=6 owner=governed-build pid=61965 alive=yes created=2026-10-05T17:14:31Z
+[1/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/benchmark/catch_chronometer.cpp.o
+[2/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/benchmark/detail/catch_analyse.cpp.o
+[3/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/benchmark/detail/catch_benchmark_function.cpp.o
+[4/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/benchmark/detail/catch_run_for_at_least.cpp.o
+[5/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/generators/catch_generator_exception.cpp.o
+[6/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/benchmark/detail/catch_stats.cpp.o
+[7/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/generators/catch_generators.cpp.o
+[8/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/generators/catch_generators_random.cpp.o
+[9/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/reporters/catch_reporter_automake.cpp.o
+[10/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/reporters/catch_reporter_common_base.cpp.o
+[11/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/reporters/catch_reporter_compact.cpp.o
+[12/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/reporters/catch_reporter_console.cpp.o
+[13/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/reporters/catch_reporter_cumulative_base.cpp.o
+[14/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/reporters/catch_reporter_event_listener.cpp.o
+[15/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/reporters/catch_reporter_helpers.cpp.o
+[16/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/reporters/catch_reporter_json.cpp.o
+[17/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/reporters/catch_reporter_junit.cpp.o
+[18/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/reporters/catch_reporter_registrars.cpp.o
+[19/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/reporters/catch_reporter_multi.cpp.o
+[20/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/reporters/catch_reporter_sonarqube.cpp.o
+[21/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/reporters/catch_reporter_streaming_base.cpp.o
+[22/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/reporters/catch_reporter_tap.cpp.o
+[23/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/reporters/catch_reporter_teamcity.cpp.o
+[24/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/interfaces/catch_interfaces_capture.cpp.o
+[25/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/reporters/catch_reporter_xml.cpp.o
+[26/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/interfaces/catch_interfaces_exception.cpp.o
+[27/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/interfaces/catch_interfaces_config.cpp.o
+[28/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/interfaces/catch_interfaces_generatortracker.cpp.o
+[29/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/interfaces/catch_interfaces_registry_hub.cpp.o
+[30/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/interfaces/catch_interfaces_reporter_factory.cpp.o
+[31/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/interfaces/catch_interfaces_reporter.cpp.o
+[32/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/interfaces/catch_interfaces_testcase.cpp.o
+[33/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/catch_approx.cpp.o
+[34/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/catch_assertion_result.cpp.o
+[35/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/catch_get_random_seed.cpp.o
+[36/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/catch_config.cpp.o
+[37/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/catch_message.cpp.o
+[38/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/catch_registry_hub.cpp.o
+[39/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/catch_tag_alias_autoregistrar.cpp.o
+[40/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/catch_session.cpp.o
+[41/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/catch_test_case_info.cpp.o
+[42/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/catch_timer.cpp.o
+[43/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/catch_test_spec.cpp.o
+[44/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/catch_totals.cpp.o
+[45/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/catch_translate_exception.cpp.o
+[46/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/catch_tostring.cpp.o
+[47/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/catch_version.cpp.o
+[48/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_assertion_handler.cpp.o
+[49/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_case_insensitive_comparisons.cpp.o
+[50/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_clara.cpp.o
+[51/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_console_colour.cpp.o
+[52/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_context.cpp.o
+[53/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_commandline.cpp.o
+[54/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_debug_console.cpp.o
+[55/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_debugger.cpp.o
+[56/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_enforce.cpp.o
+[57/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_decomposer.cpp.o
+[58/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_errno_guard.cpp.o
+[59/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_enum_values_registry.cpp.o
+[60/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_exception_translator_registry.cpp.o
+[61/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_floating_point_helpers.cpp.o
+[62/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_getenv.cpp.o
+[63/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_fatal_condition_handler.cpp.o
+[64/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_istream.cpp.o
+[65/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_jsonwriter.cpp.o
+[66/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_leak_detector.cpp.o
+[67/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_lazy_expr.cpp.o
+[68/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_message_info.cpp.o
+[69/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_list.cpp.o
+[70/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_output_redirect.cpp.o
+[71/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_polyfills.cpp.o
+[72/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_random_number_generator.cpp.o
+[73/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_parse_numbers.cpp.o
+[74/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_random_seed_generation.cpp.o
+[75/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_reporter_registry.cpp.o
+[76/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_result_type.cpp.o
+[77/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_reporter_spec_parser.cpp.o
+[78/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_reusable_string_stream.cpp.o
+[79/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_run_context.cpp.o
+[80/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_section.cpp.o
+[81/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_singletons.cpp.o
+[82/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_source_line_info.cpp.o
+[83/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_startup_exception_registry.cpp.o
+[84/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_stdstreams.cpp.o
+[85/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_string_manip.cpp.o
+[86/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_stringref.cpp.o
+[87/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_tag_alias_registry.cpp.o
+[88/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_test_case_info_hasher.cpp.o
+[89/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_test_case_tracker.cpp.o
+[90/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_test_case_registry_impl.cpp.o
+[91/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_test_failure_exception.cpp.o
+[92/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_test_registry.cpp.o
+[93/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_test_spec_parser.cpp.o
+[94/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_uncaught_exceptions.cpp.o
+[95/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_textflow.cpp.o
+[96/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_wildcard_pattern.cpp.o
+[97/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_xmlwriter.cpp.o
+[98/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/matchers/catch_matchers.cpp.o
+[99/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/matchers/catch_matchers_container_properties.cpp.o
+[100/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/matchers/catch_matchers_exception.cpp.o
+[101/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/matchers/catch_matchers_floating_point.cpp.o
+[102/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/matchers/catch_matchers_predicate.cpp.o
+[103/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/matchers/catch_matchers_quantifiers.cpp.o
+[104/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/matchers/catch_matchers_templated.cpp.o
+[105/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/matchers/catch_matchers_string.cpp.o
+[106/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/matchers/internal/catch_matchers_impl.cpp.o
+[107/136] Linking CXX static library _deps/catch2-build/src/libCatch2.a
+[108/136] Building CXX object _deps/catch2-build/src/CMakeFiles/Catch2WithMain.dir/catch2/internal/catch_main.cpp.o
+[109/136] Building CXX object src/CMakeFiles/GpuNam_Core.dir/gpu_nam_stamped_node.cpp.o
+[110/136] Building CXX object src/CMakeFiles/GpuNam_Core.dir/gpu_nam_view.cpp.o
+[111/136] Building CXX object src/CMakeFiles/GpuNam_CLAP.dir/clap_entry.cpp.o
+[112/136] Building CXX object src/CMakeFiles/GpuNam_CLAP.dir/GpuNam_GpuNam_CLAP_CLAP_control_shipping_marker.cpp.o
+[113/136] Linking CXX static library _deps/catch2-build/src/libCatch2Main.a
+[114/136] Building CXX object src/CMakeFiles/gpu-nam-stamped-validation.dir/gpu_nam_stamped_node.cpp.o
+[115/136] Building OBJCXX object src/CMakeFiles/GpuNam_CLAP.dir/pulp_mac_objc/GpuNam_CLAP_mac_objc_cluster.mm.o
+In file included from /Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/pulp_mac_objc/GpuNam_CLAP_mac_objc_cluster.mm:9:
+/Users/danielraffel/Code/pulp-sdk-v0.913.1-arm64/pulp-sdk/lib/cmake/Pulp/../../../src/pulp/view/platform/mac/window_host_mac_geometry.mm:130:17: warning: multiple methods named 'set' found [-Wobjc-multiple-method-names]
+  130 |                 [[NSCursor performSelector:@selector(zoomInCursor)] set];
+      |                 ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/Foundation.framework/Headers/NSOrderedSet.h:158:49: note: using
+  158 | @property (readonly, strong) NSSet<ObjectType> *set;
+      |                                                 ^~~
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSColor.h:295:1: note: also found
+  295 | - (void)set;
+      | ^~~~~~~~~~~~
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSFont.h:124:1: note: also found
+  124 | - (void)set;
+      | ^~~~~~~~~~~~
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSBrowserCell.h:30:1: note: also found
+   30 | - (void)set;
+      | ^~~~~~~~~~~~
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSCursor.h:50:1: note: also found
+   50 | - (void)set;
+      | ^~~~~~~~~~~~
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSAffineTransform.h:21:1: note: also found
+   21 | - (void)set;
+      | ^~~~~~~~~~~~
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSShadow.h:35:1: note: also found
+   35 | - (void)set;
+      | ^~~~~~~~~~~~
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSPressureConfiguration.h:28:1: note: also found
+   28 | - (void)set;
+      | ^~~~~~~~~~~~
+In file included from /Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/pulp_mac_objc/GpuNam_CLAP_mac_objc_cluster.mm:9:
+/Users/danielraffel/Code/pulp-sdk-v0.913.1-arm64/pulp-sdk/lib/cmake/Pulp/../../../src/pulp/view/platform/mac/window_host_mac_geometry.mm:137:17: warning: multiple methods named 'set' found [-Wobjc-multiple-method-names]
+  137 |                 [[NSCursor performSelector:@selector(zoomOutCursor)] set];
+      |                 ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/Foundation.framework/Headers/NSOrderedSet.h:158:49: note: using
+  158 | @property (readonly, strong) NSSet<ObjectType> *set;
+      |                                                 ^~~
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSColor.h:295:1: note: also found
+  295 | - (void)set;
+      | ^~~~~~~~~~~~
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSFont.h:124:1: note: also found
+  124 | - (void)set;
+      | ^~~~~~~~~~~~
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSBrowserCell.h:30:1: note: also found
+   30 | - (void)set;
+      | ^~~~~~~~~~~~
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSCursor.h:50:1: note: also found
+   50 | - (void)set;
+      | ^~~~~~~~~~~~
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSAffineTransform.h:21:1: note: also found
+   21 | - (void)set;
+      | ^~~~~~~~~~~~
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSShadow.h:35:1: note: also found
+   35 | - (void)set;
+      | ^~~~~~~~~~~~
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSPressureConfiguration.h:28:1: note: also found
+   28 | - (void)set;
+      | ^~~~~~~~~~~~
+In file included from /Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/pulp_mac_objc/GpuNam_CLAP_mac_objc_cluster.mm:18:
+/Users/danielraffel/Code/pulp-sdk-v0.913.1-arm64/pulp-sdk/lib/cmake/Pulp/../../../src/pulp/view/platform/mac/window_host_mac.mm:1332:1: warning: method possibly missing a [super dealloc] call [-Wobjc-missing-super-calls]
+ 1332 | }
+      | ^
+3 warnings generated.
+[116/136] Building CXX object src/CMakeFiles/gpu-nam-stamped-validation.dir/gpu_nam_stamped_paced.cpp.o
+[117/136] Building CXX object src/CMakeFiles/gpu-nam-stamped-multichannel-validation.dir/gpu_nam_stamped_node.cpp.o
+[118/136] Building CXX object src/CMakeFiles/gpu-nam-stamped-validation.dir/test_gpu_nam_stamped_node.cpp.o
+[119/136] Building CXX object src/CMakeFiles/gpu-nam-completion-options-test.dir/test_gpu_nam_completion_options.cpp.o
+[120/136] Building CXX object src/CMakeFiles/gpu-nam-paced-options-test.dir/test_gpu_nam_paced_options.cpp.o
+[121/136] Building CXX object src/CMakeFiles/gpu-nam-stamped-multichannel-validation.dir/test_gpu_nam_stamped_multichannel.cpp.o
+[122/136] Building CXX object src/CMakeFiles/GpuNam_Standalone.dir/main.cpp.o
+[123/136] Linking CXX CFBundle shared module CLAP/GpuNam.clap/Contents/MacOS/GpuNam; Writing PkgInfo into GpuNam.clap bundle; Copying WebGPU runtime next to GpuNam_CLAP; Writing pulp-build-info.json into GpuNam_CLAP; Bundling example.nam + UI assets into GpuNam_CLAP; Verifying GpuNam_CLAP bundle is self-contained (relocatable)
+ld: warning: ignoring duplicate libraries: '/Users/danielraffel/Code/pulp-sdk-v0.913.1-arm64/pulp-sdk/lib/libpulp-render.a'
+check_bundle_relocatable: GpuNam_CLAP is self-contained ✅
+[124/136] Building CXX object src/CMakeFiles/GpuNam_Standalone.dir/GpuNam_GpuNam_Standalone_STANDALONE_control_shipping_marker.cpp.o
+[125/136] Building OBJCXX object src/CMakeFiles/GpuNam_Standalone.dir/pulp_mac_objc/GpuNam_Standalone_mac_objc_cluster.mm.o
+In file included from /Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/pulp_mac_objc/GpuNam_Standalone_mac_objc_cluster.mm:9:
+/Users/danielraffel/Code/pulp-sdk-v0.913.1-arm64/pulp-sdk/lib/cmake/Pulp/../../../src/pulp/view/platform/mac/window_host_mac_geometry.mm:130:17: warning: multiple methods named 'set' found [-Wobjc-multiple-method-names]
+  130 |                 [[NSCursor performSelector:@selector(zoomInCursor)] set];
+      |                 ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/Foundation.framework/Headers/NSOrderedSet.h:158:49: note: using
+  158 | @property (readonly, strong) NSSet<ObjectType> *set;
+      |                                                 ^~~
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSColor.h:295:1: note: also found
+  295 | - (void)set;
+      | ^~~~~~~~~~~~
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSFont.h:124:1: note: also found
+  124 | - (void)set;
+      | ^~~~~~~~~~~~
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSBrowserCell.h:30:1: note: also found
+   30 | - (void)set;
+      | ^~~~~~~~~~~~
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSCursor.h:50:1: note: also found
+   50 | - (void)set;
+      | ^~~~~~~~~~~~
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSAffineTransform.h:21:1: note: also found
+   21 | - (void)set;
+      | ^~~~~~~~~~~~
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSShadow.h:35:1: note: also found
+   35 | - (void)set;
+      | ^~~~~~~~~~~~
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSPressureConfiguration.h:28:1: note: also found
+   28 | - (void)set;
+      | ^~~~~~~~~~~~
+In file included from /Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/pulp_mac_objc/GpuNam_Standalone_mac_objc_cluster.mm:9:
+/Users/danielraffel/Code/pulp-sdk-v0.913.1-arm64/pulp-sdk/lib/cmake/Pulp/../../../src/pulp/view/platform/mac/window_host_mac_geometry.mm:137:17: warning: multiple methods named 'set' found [-Wobjc-multiple-method-names]
+  137 |                 [[NSCursor performSelector:@selector(zoomOutCursor)] set];
+      |                 ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/Foundation.framework/Headers/NSOrderedSet.h:158:49: note: using
+  158 | @property (readonly, strong) NSSet<ObjectType> *set;
+      |                                                 ^~~
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSColor.h:295:1: note: also found
+  295 | - (void)set;
+      | ^~~~~~~~~~~~
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSFont.h:124:1: note: also found
+  124 | - (void)set;
+      | ^~~~~~~~~~~~
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSBrowserCell.h:30:1: note: also found
+   30 | - (void)set;
+      | ^~~~~~~~~~~~
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSCursor.h:50:1: note: also found
+   50 | - (void)set;
+      | ^~~~~~~~~~~~
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSAffineTransform.h:21:1: note: also found
+   21 | - (void)set;
+      | ^~~~~~~~~~~~
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSShadow.h:35:1: note: also found
+   35 | - (void)set;
+      | ^~~~~~~~~~~~
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSPressureConfiguration.h:28:1: note: also found
+   28 | - (void)set;
+      | ^~~~~~~~~~~~
+In file included from /Users/danielraffel/Code/gpu-nam-sdk09131-preflight-20261005/build-sdk09131-r1/src/pulp_mac_objc/GpuNam_Standalone_mac_objc_cluster.mm:18:
+/Users/danielraffel/Code/pulp-sdk-v0.913.1-arm64/pulp-sdk/lib/cmake/Pulp/../../../src/pulp/view/platform/mac/window_host_mac.mm:1332:1: warning: method possibly missing a [super dealloc] call [-Wobjc-missing-super-calls]
+ 1332 | }
+      | ^
+3 warnings generated.
+[126/136] Building CXX object src/CMakeFiles/gpu-nam-plugin-test.dir/test_gpu_nam_plugin.cpp.o
+[127/136] Building CXX object src/CMakeFiles/gpu-nam-plugin-test.dir/gpu_nam_stamped_node.cpp.o
+[128/136] Building CXX object src/CMakeFiles/gpu-nam-plugin-test.dir/gpu_nam_view.cpp.o
+[129/136] Building CXX object src/CMakeFiles/gpu-nam-clap-host-test.dir/test_gpu_nam_clap_host.cpp.o
+[130/136] Linking CXX executable src/gpu-nam-stamped-validation
+[131/136] Linking CXX executable src/gpu-nam-stamped-multichannel-validation
+[132/136] Linking CXX executable src/gpu-nam-paced-options-test
+[133/136] Linking CXX executable src/gpu-nam-completion-options-test
+[134/136] Linking CXX executable src/gpu-nam-plugin-test
+ld: warning: ignoring duplicate libraries: '/Users/danielraffel/Code/pulp-sdk-v0.913.1-arm64/pulp-sdk/lib/libpulp-canvas.a', '/Users/danielraffel/Code/pulp-sdk-v0.913.1-arm64/pulp-sdk/lib/libpulp-render.a', '/Users/danielraffel/Code/pulp-sdk-v0.913.1-arm64/pulp-sdk/lib/libpulp-runtime.a'
+[135/136] Linking CXX executable src/gpu-nam-clap-host-test
+[136/136] Linking CXX executable src/GpuNam.app/Contents/MacOS/GpuNam; Copying WebGPU runtime next to GpuNam_Standalone; Portability check: GpuNam_Standalone must not bake build-tree paths; Writing pulp-build-info.json into GpuNam_Standalone; Bundling example.nam + UI assets into GpuNam_Standalone; Verifying GpuNam_Standalone bundle is self-contained (relocatable)
+ld: warning: ignoring duplicate libraries: '/Users/danielraffel/Code/pulp-sdk-v0.913.1-arm64/pulp-sdk/lib/libpulp-render.a'
+check_bundle_relocatable: GpuNam_Standalone is self-contained ✅
