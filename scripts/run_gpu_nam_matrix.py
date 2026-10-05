@@ -2,6 +2,8 @@
 import argparse,csv,hashlib,json,math,os,subprocess,sys,tempfile
 from pathlib import Path
 CASES=[(b,l) for b in (32,64,128) for l in (1,2,4,8)]
+def cases_for_capacity(capacity):
+ return [(b,l) for b,l in CASES if capacity is None or l < capacity]
 def sha(p): return hashlib.sha256(Path(p).read_bytes()).hexdigest()
 def complete_sidecar(path, expected, lead):
  try:
@@ -69,7 +71,7 @@ def main():
  model=Path(a.model).resolve() if a.model else Path(__file__).resolve().parents[1]/'src/models/example.nam'
  if not model.is_file(): print('required model missing',file=sys.stderr); return 2
  before=sha(exe); rows=[]; unavailable=False
- for b,l in CASES:
+ for b,l in cases_for_capacity(a.capacity):
   log=out/f'matrix-{b}-{l}.log'
   command=([str(exe),str(l),str(b),str(model),f'--completion-policy={policy}',f'--worker-wait-ns={a.worker_wait_ns}'] if a.stamped else [str(exe),f'--block-size={b}',f'--lead-blocks={l}',f'--model-path={model}'])
   if a.stamped and a.capacity is not None: command.append(f'--capacity={a.capacity}')
@@ -98,7 +100,7 @@ def main():
    elif row['status']=='diagnostic_status=passed': row['metrics']=sidecar_summary(sidecar)
   rows.append(row)
  after=sha(exe); failed=any(r['exit_code']!=0 or r['status']!='diagnostic_status=passed' for r in rows)
- rec={'schema':'pulp.gpu_nam.matrix.v2','executable':str(exe),'executable_sha256_before':before,'executable_sha256_after':after,'source_commit':subprocess.check_output(['git','rev-parse','HEAD'],cwd=Path(__file__).resolve().parents[1],text=True).strip(),'model':str(model),'model_sha256':sha(model),'transport_overlay_object_sha256':a.transport_sha,'cases':rows,'case_count':len(rows),'cpu_process_time_baseline':'open','consumer':'stamped' if a.stamped else 'legacy-diagnostic','completion_policy':policy if a.stamped else None,'worker_wait_ns':a.worker_wait_ns if a.stamped else None,'requested_capacity':a.capacity,'effective_capacity':a.capacity if a.capacity is not None else (16 if a.stamped else None),'paced':a.paced,'cpu_baseline':a.cpu_baseline,'duration_seconds':a.duration_seconds or (10 if a.paced and a.blocks is None else None),'input_blocks':a.blocks}
+ rec={'schema':'pulp.gpu_nam.matrix.v2','executable':str(exe),'executable_sha256_before':before,'executable_sha256_after':after,'source_commit':subprocess.check_output(['git','rev-parse','HEAD'],cwd=Path(__file__).resolve().parents[1],text=True).strip(),'model':str(model),'model_sha256':sha(model),'transport_overlay_object_sha256':a.transport_sha,'cases':rows,'case_count':len(rows),'requested_cases':len(cases_for_capacity(a.capacity)),'cpu_process_time_baseline':'open','consumer':'stamped' if a.stamped else 'legacy-diagnostic','completion_policy':policy if a.stamped else None,'worker_wait_ns':a.worker_wait_ns if a.stamped else None,'requested_capacity':a.capacity,'effective_capacity':a.capacity if a.capacity is not None else (16 if a.stamped else None),'paced':a.paced,'cpu_baseline':a.cpu_baseline,'duration_seconds':a.duration_seconds or (10 if a.paced and a.blocks is None else None),'input_blocks':a.blocks}
  (out/'receipt.json').write_text(json.dumps(rec,indent=2)+'\n')
  if before!=after or failed: return 3 if before!=after else (4 if unavailable else 1)
  return 0

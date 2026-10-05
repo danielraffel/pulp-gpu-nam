@@ -5,6 +5,12 @@ from pathlib import Path
 HERE=Path(__file__).resolve().parent; RUN=HERE/'run_gpu_nam_matrix.sh'
 MODEL=HERE.parent/'src/models/example.nam'
 class T(unittest.TestCase):
+ def test_capacity_filters_invalid_leads(self):
+  spec=importlib.util.spec_from_file_location('runner_cases',HERE/'run_gpu_nam_matrix.py'); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+  self.assertEqual(len(m.cases_for_capacity(2)),3)
+  self.assertEqual(len(m.cases_for_capacity(4)),6)
+  self.assertEqual(len(m.cases_for_capacity(8)),9)
+  self.assertEqual(len(m.cases_for_capacity(16)),12)
  def fake(self,body):
   d=Path(tempfile.mkdtemp()); p=d/'fake'; p.write_text('#!/bin/sh\n'+body); p.chmod(0o755); return d,p
  def runr(self,p,out,model=MODEL): return subprocess.run([str(RUN),str(p),str(out),'--model',str(model)],capture_output=True,text=True)
