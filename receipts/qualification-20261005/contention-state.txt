@@ -1,0 +1,10 @@
+contention_snapshot_schema=process-identity-only.v1
+redaction_policy=command_arguments_paths_credentials_environment_pids_and_unrelated_processes_removed
+observed_contention_processes:
+- class=virtualization_vm; executable=Virtualization.framework.VirtualMachine; observed_count=2
+- class=android_emulator; executable=qemu-system-aarch64; observed_count=1
+- class=tart_ci; executable=tartci-launcher_or_runner; observed_count=multiple
+- class=tart_ci; executable=tart; observed_count=multiple
+- class=macos_indexing; executable=mds_stores_or_mdworker_family; observed_count=multiple
+- class=macos_indexing; executable=media-indexer_or_search-reindex; observed_count=multiple
+assessment=host_not_quiet

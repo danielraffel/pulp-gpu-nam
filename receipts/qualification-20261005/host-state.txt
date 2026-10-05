@@ -1,0 +1,5 @@
+host_snapshot_schema=quiet-gate-minimal.v1
+architecture=arm64
+os=macOS 27.0.1
+load_class=high
+quiet_host_gate=failed
