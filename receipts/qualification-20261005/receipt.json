@@ -31,9 +31,9 @@
       "sha256": "8891714d1c42483a8e63f7cb97fba6e2fca31c9b92c7c56fef0a92bf05f133a0"
     },
     "host-state.txt": {
-      "bytes": 1905,
+      "bytes": 117,
       "path": "/Users/danielraffel/Code/gpu-nam-qualification-20261005/receipts/qualification-20261005/host-state.txt",
-      "sha256": "c02996a07d88187effa6ee4857872ef68fdc684aa9c4c4ba6218b37c1e4d8d92"
+      "sha256": "761f11b7ed58ab7589a0f16c9a8ef1308dbe0875d894b003552375fd4cbc146d"
     },
     "sdk-state.txt": {
       "bytes": 578,
@@ -42,11 +42,9 @@
     }
   },
   "host": {
-    "load": "15.02 13.33 10.86",
-    "logical_cpus": 30,
-    "machine": "arm64",
-    "os": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
-    "thermal_snapshot": false
+    "architecture": "arm64",
+    "load_class": "high",
+    "os": "macOS 27.0.1"
   },
   "next_packet": [
     "Initialize the pinned submodule at gitlink 9cc65128d0680b55ffeeafc351e2ce59b73c85cb or provide an official Pulp SDK 0.910.0 prefix with sdk-provenance.json and immutable artifact hashes.",
@@ -64,7 +62,7 @@
   "pulp_sdk": {
     "checkout_present": false,
     "gitlink": "9cc65128d0680b55ffeeafc351e2ce59b73c85cb",
-    "provenance_artifact_found": false,
+    "matching_required_version_provenance": false,
     "required_version": "0.910.0"
   },
   "quiet_host_gate": {
