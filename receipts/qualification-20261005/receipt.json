@@ -21,9 +21,9 @@
   },
   "evidence_files": {
     "contention-state.txt": {
-      "bytes": 31468,
+      "bytes": 701,
       "path": "/Users/danielraffel/Code/gpu-nam-qualification-20261005/receipts/qualification-20261005/contention-state.txt",
-      "sha256": "57c8278f3285c80b829bceb0b37849f09e0a259130d0699d3a4d68955b885a8a"
+      "sha256": "6bab06ee9c91ff99b93d4fe475c5642e886a16e607d046b33d3372203ce31a2d"
     },
     "git-state.txt": {
       "bytes": 253,
@@ -55,6 +55,7 @@
     "Run matched max_inflight=1 and 4 at one model/block/lead/completion policy with CPU oracle, callback disposition counters, lifecycle/retirement identity, and complete raw sidecars/logs.",
     "Only then issue a product verdict; loaded-host, synthetic, registration-only, or metadata-only evidence remains non-product proof."
   ],
+  "provider_auth_not_attempted": true,
   "provider_authentication": {
     "attempted": false,
     "exact_provider_proof": false,
