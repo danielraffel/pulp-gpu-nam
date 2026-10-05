@@ -26,6 +26,8 @@ int main() {
     if (!check(matrix.parse("--capacity=8") && matrix.capacity == 8 &&
                matrix.parse("--max-inflight=4") && matrix.max_inflight == 4 &&
                matrix.valid(32, 2))) return 6;
+    if (!check(matrix.parse("--capacity=16") && matrix.capacity == 16 &&
+               matrix.valid(32, 8))) return 6;
     for (const auto arg : {"--capacity=0", "--capacity=3", "--capacity=65", "--capacity=4x",
                            "--max-inflight=0", "--max-inflight=3", "--max-inflight=9", "--max-inflight=4x"}) {
         GpuNamPacedOptions invalid;

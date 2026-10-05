@@ -44,6 +44,11 @@ class T(unittest.TestCase):
   self.assertEqual(r.returncode,0,r.stderr); lines=args.read_text().splitlines(); self.assertEqual(len(lines),12)
   self.assertIn('1 32 '+str(MODEL.resolve()),lines[0]); self.assertIn('--completion-policy=timed-wait-any --worker-wait-ns=100000',lines[0])
   rec=json.loads((d/'o/receipt.json').read_text()); self.assertEqual(rec['completion_policy'],'timed-wait-any'); self.assertEqual(rec['worker_wait_ns'],100000)
+ def test_capacity_is_forwarded_and_recorded(self):
+  d,p=self.fake('echo "$@" >> "$FAKE_ARGS"\necho diagnostic_status=passed\n'); args=d/'args'; env=dict(os.environ,FAKE_ARGS=str(args))
+  r=subprocess.run([str(RUN),str(p),str(d/'o'),'--model',str(MODEL),'--stamped','--capacity=16'],env=env,capture_output=True,text=True)
+  self.assertEqual(r.returncode,0,r.stderr); self.assertIn('--capacity=16',args.read_text().splitlines()[0])
+  rec=json.loads((d/'o/receipt.json').read_text()); self.assertEqual(rec['requested_capacity'],16); self.assertEqual(rec['effective_capacity'],16)
  def test_completion_options_rejected_before_execution(self):
   for options in (['--completion-policy=wait-any'],['--stamped','--worker-wait-ns=1'],['--stamped','--completion-policy=wait-any','--worker-wait-ns=1'],['--stamped','--completion-policy=timed-wait-any','--worker-wait-ns=1000001'],['--stamped','--worker-wait-ns=-1'],['--stamped','--completion-policy=invalid']):
    with self.subTest(options=options):
@@ -55,7 +60,7 @@ class T(unittest.TestCase):
   r=subprocess.run([str(RUN),str(p),str(d/'o'),'--stamped','--paced','--blocks=2'],capture_output=True,text=True)
   self.assertNotEqual(r.returncode,0); rec=json.loads((d/'o/receipt.json').read_text()); self.assertEqual(rec['cases'][0]['status'],'missing_sidecar')
  def test_paced_flags_and_sidecar_bound(self):
-  d,p=self.fake('for a in "$@"; do case "$a" in --sidecar=*) f=${a#--sidecar=};; esac; done\necho block,delivered_input_sequence,scheduled_ns,start_ns,end_ns,deadline_ns,selected > "$f"\ni=0; n=$((3+$1)); while [ $i -lt $n ]; do if [ $i -lt $1 ]; then delivered=; selected=priming; else delivered=$((i-$1)); selected=cpu_baseline; fi; echo "$i,$delivered,$i,$i,$i,$((i+1)),$selected" >> "$f"; i=$((i+1)); done\necho diagnostic_status=passed\n')
+  d,p=self.fake('for a in "$@"; do case "$a" in --sidecar=*) f=${a#--sidecar=};; esac; done\necho block,delivered_input_sequence,scheduled_ns,start_ns,end_ns,deadline_ns,selected,deadline_missed,start_lateness_ns > "$f"\ni=0; n=$((3+$1)); while [ $i -lt $n ]; do if [ $i -lt $1 ]; then delivered=; selected=priming; else delivered=$((i-$1)); selected=cpu_baseline; fi; echo "$i,$delivered,$i,$i,$i,$((i+1)),$selected,0,0" >> "$f"; i=$((i+1)); done\necho diagnostic_status=passed\n')
   r=subprocess.run([str(RUN),str(p),str(d/'o'),'--stamped','--paced','--cpu-baseline','--blocks=3'],capture_output=True,text=True)
   self.assertEqual(r.returncode,0,r.stderr); rec=json.loads((d/'o/receipt.json').read_text()); self.assertTrue(rec['paced']); self.assertTrue(rec['cpu_baseline']); self.assertEqual(rec['input_blocks'],3); self.assertEqual(len(rec['cases'][0]['sidecar_sha256']),64)
  def test_invalid_paced_flags(self):
