@@ -39,7 +39,9 @@ struct GpuNamPacedOptions {
         }
         if (arg.starts_with("--capacity=")) {
             if (!number("--capacity=", capacity)) return false;
-            return capacity == 2 || capacity == 4 || capacity == 8;
+            // Include the SDK's 16-slot default so the highest-capacity case
+            // can be exercised explicitly by the stamped campaign.
+            return capacity == 2 || capacity == 4 || capacity == 8 || capacity == 16;
         }
         if (arg.starts_with("--max-inflight=")) {
             if (!number("--max-inflight=", max_inflight)) return false;
