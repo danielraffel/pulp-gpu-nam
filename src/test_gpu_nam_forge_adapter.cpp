@@ -217,6 +217,43 @@ TEST_CASE("GPU request is typed as CPU fallback when provider delivery is unavai
         CHECK_FALSE(status.active);
         CHECK(status.delivery.gpu_selected == 0);
         CHECK(status.delivery.worker_selected == 0);
+
+        // Exercise the same graph callback after the refusal. A status-only
+        // assertion could pass while the host emits silence, so require finite
+        // nonzero fallback audio from several blocks and re-check the effective
+        // engine after delivery.
+        const auto probe = make_probe(static_cast<std::size_t>(kBlockSize * 4));
+        std::vector<float> input_left(kBlockSize, 0.0f);
+        std::vector<float> input_right(kBlockSize, 0.0f);
+        std::vector<float> output_left(kBlockSize, 0.0f);
+        std::vector<float> output_right(kBlockSize, 0.0f);
+        const float* input_channels[] = {input_left.data(), input_right.data()};
+        float* output_channels[] = {output_left.data(), output_right.data()};
+        double energy = 0.0;
+        bool finite = true;
+        for (int block = 0; block < 4; ++block) {
+            const auto offset = static_cast<std::size_t>(block * kBlockSize);
+            std::copy_n(probe.data() + offset, kBlockSize, input_left.data());
+            std::copy_n(probe.data() + offset, kBlockSize, input_right.data());
+            std::fill(output_left.begin(), output_left.end(), 0.0f);
+            std::fill(output_right.begin(), output_right.end(), 0.0f);
+            pulp::audio::BufferView<const float> input_view(
+                input_channels, 2, kBlockSize);
+            pulp::audio::BufferView<float> output_view(
+                output_channels, 2, kBlockSize);
+            graph.process(output_view, input_view, kBlockSize);
+            for (int i = 0; i < kBlockSize; ++i) {
+                finite = finite && std::isfinite(output_left[static_cast<std::size_t>(i)]) &&
+                         std::isfinite(output_right[static_cast<std::size_t>(i)]);
+                energy += static_cast<double>(output_left[static_cast<std::size_t>(i)]) *
+                          output_left[static_cast<std::size_t>(i)];
+                energy += static_cast<double>(output_right[static_cast<std::size_t>(i)]) *
+                          output_right[static_cast<std::size_t>(i)];
+            }
+        }
+        CHECK(finite);
+        CHECK(energy > 1.0e-8);
+        CHECK(gpu_nam->effective_engine() == 0);
     } else {
         // A provider-capable host must expose the authenticated capability report
         // and a delivery surface; numerical GPU acceptance is a separate Forge
