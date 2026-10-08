@@ -36,6 +36,8 @@ endif()
 # private Catch2 so the plugin tests build without turning on Pulp's whole
 # test tree.
 option(GPU_NAM_BUILD_TESTS "Build GPU NAM's own test suite" ON)
+option(GPU_NAM_BUILD_FORGE_ADAPTER
+    "Expose an opt-in in-process Processor factory for Forge graph consumers" OFF)
 option(GPU_NAM_NATIVE_HOST_PROBE
     "Add a diagnostic-only CLAP query and host test (never distribute this build)" OFF)
 if(GPU_NAM_NATIVE_HOST_PROBE AND NOT GPU_NAM_BUILD_TESTS)

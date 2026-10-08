@@ -324,6 +324,49 @@ if(TARGET pulp::render AND TARGET pulp::gpu-audio)
         # GPU_NAM_ASSET_DIR fallback when they run outside a bundle.
     endif()
 
+    if(GPU_NAM_BUILD_FORGE_ADAPTER)
+        if(NOT TARGET GpuNam_Core)
+            message(FATAL_ERROR
+                "GPU_NAM_BUILD_FORGE_ADAPTER requires the GpuNam_Core target")
+        endif()
+        # The adapter is an interface target over the existing processor core.
+        # Forge consumes the same NAM implementation, control authority, and
+        # provider accounting; no second DSP or model registry is introduced.
+        add_library(GpuNam_ForgeAdapter INTERFACE)
+        add_library(GpuNam::ForgeAdapter ALIAS GpuNam_ForgeAdapter)
+        target_include_directories(GpuNam_ForgeAdapter INTERFACE
+            "${CMAKE_CURRENT_SOURCE_DIR}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../include")
+        target_compile_definitions(GpuNam_ForgeAdapter INTERFACE
+            "GPU_NAM_VERSION_STRING=\"${GPU_NAM_VERSION}\"")
+        # `pulp_add_plugin` keeps the processor implementation in an object
+        # library so each format target can embed it. Propagate those objects
+        # explicitly for graph consumers; an interface link alone would expose
+        # headers while leaving the Processor vtable out of the final binary.
+        target_sources(GpuNam_ForgeAdapter INTERFACE
+            $<TARGET_OBJECTS:GpuNam_Core>)
+        target_link_libraries(GpuNam_ForgeAdapter INTERFACE GpuNam_Core)
+        if(TARGET Pulp::host)
+            target_link_libraries(GpuNam_ForgeAdapter INTERFACE Pulp::host)
+        elseif(TARGET pulp::host)
+            target_link_libraries(GpuNam_ForgeAdapter INTERFACE pulp::host)
+        else()
+            message(FATAL_ERROR
+                "GPU_NAM_BUILD_FORGE_ADAPTER requires the Pulp host graph target")
+        endif()
+
+        if(GPU_NAM_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
+            add_executable(gpu-nam-forge-adapter-test
+                test_gpu_nam_forge_adapter.cpp)
+            target_link_libraries(gpu-nam-forge-adapter-test PRIVATE
+                GpuNam::ForgeAdapter Catch2::Catch2WithMain)
+            target_compile_definitions(gpu-nam-forge-adapter-test PRIVATE
+                GPU_NAM_DEFAULT_MODEL_PATH="${GPU_NAM_MODEL}"
+                GPU_NAM_ASSET_DIR="${GPU_NAM_ASSETS}")
+            catch_discover_tests(gpu-nam-forge-adapter-test)
+        endif()
+    endif()
+
     # Bundle the default model into each format's Resources so the plugin finds it
     # at runtime next to the binary (the build-define is the source-tree fallback).
     foreach(_gn_target GpuNam_CLAP GpuNam_VST3 GpuNam_AU GpuNam_Standalone)
