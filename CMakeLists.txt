@@ -199,4 +199,14 @@ if(GPU_NAM_BUILD_TESTS)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
     add_test(NAME gpu-nam-sdk-contract
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_sdk_contract.py)
+    # The production receipt runner is intentionally an explicit operator
+    # command because it needs a distribution SDK and a real GPU provider.  Its
+    # parser/positive/typed-negative contract is still a normal CTest gate so a
+    # change cannot silently weaken the fail-closed receipt before an operator
+    # runs the hardware-backed lane.
+    add_test(NAME gpu-nam-production-receipt-contract
+        COMMAND ${Python3_EXECUTABLE} -B
+            ${CMAKE_CURRENT_SOURCE_DIR}/tools/validation/test_gpu_nam_production_receipt.py)
+    set_tests_properties(gpu-nam-production-receipt-contract PROPERTIES
+        LABELS "validation;receipt")
 endif()

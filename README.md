@@ -134,6 +134,13 @@ cmake --build build -j$(sysctl -n hw.ncpu)
 ctest --test-dir build -R gpu-nam --output-on-failure
 ```
 
+For an exact installed-SDK/provider/model receipt with a typed corruption
+control, see [`docs/production-gpu-nam-receipt.md`](docs/production-gpu-nam-receipt.md)
+and run `tools/validation/gpu_nam_production_receipt.py`.
+The receipt parser and its positive/negative contract are also available as
+the `gpu-nam-production-receipt-contract` CTest; that test uses a fake driver
+and does not replace the real provider receipt.
+
 - `gpu-nam-gpu-test` — the fused GPU WaveNet reproduces the CPU oracle (single
   block, streaming, and wins at scale).
 - `gpu-nam-plugin-test` — CPU/GPU engines produce finite amped audio, bypass is
