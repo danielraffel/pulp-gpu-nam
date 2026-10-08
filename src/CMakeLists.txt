@@ -485,8 +485,12 @@ endif()
 
 # This opt-in binary is acceptance instrumentation, not a distributable plugin.
 if(GPU_NAM_NATIVE_HOST_PROBE)
-    if(NOT APPLE OR NOT TARGET GpuNam_CLAP OR NOT GPU_NAM_EXPERIMENTAL_STAMPED_WAVENET)
-        message(FATAL_ERROR "Native host probe requires the macOS stamped CLAP target")
+    if(NOT APPLE OR NOT TARGET GpuNam_CLAP OR
+       (NOT GPU_NAM_EXPERIMENTAL_STAMPED_WAVENET AND
+        NOT GPU_NAM_EXPERIMENTAL_SHARED_WAVENET_SESSION))
+        message(FATAL_ERROR
+            "Native host probe requires the macOS CLAP target and an experimental "
+            "WaveNet adapter (stamped or shared-session)")
     endif()
     target_compile_definitions(GpuNam_CLAP PRIVATE GPU_NAM_NATIVE_HOST_PROBE=1)
     target_link_options(GpuNam_CLAP PRIVATE "LINKER:-exported_symbol,_gpu_nam_host_probe_v1")
