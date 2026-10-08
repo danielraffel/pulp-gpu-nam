@@ -494,8 +494,14 @@ if(GPU_NAM_NATIVE_HOST_PROBE)
     endif()
     target_compile_definitions(GpuNam_CLAP PRIVATE GPU_NAM_NATIVE_HOST_PROBE=1)
     target_link_options(GpuNam_CLAP PRIVATE "LINKER:-exported_symbol,_gpu_nam_host_probe_v1")
+    # Installed SDKs provide PULP_CLAP_INCLUDE_DIR; source checkouts use the
+    # FetchContent CLAP source directory instead.
+    set(_gpu_nam_clap_include "${PULP_CLAP_INCLUDE_DIR}")
+    if(NOT EXISTS "${_gpu_nam_clap_include}/clap/clap.h" AND DEFINED CLAP_SOURCE_DIR)
+        set(_gpu_nam_clap_include "${CLAP_SOURCE_DIR}/include")
+    endif()
     add_executable(gpu-nam-clap-host-test test_gpu_nam_clap_host.cpp)
-    target_include_directories(gpu-nam-clap-host-test PRIVATE "${PULP_CLAP_INCLUDE_DIR}")
+    target_include_directories(gpu-nam-clap-host-test PRIVATE "${_gpu_nam_clap_include}")
     target_link_libraries(gpu-nam-clap-host-test PRIVATE ${CMAKE_DL_LIBS})
     add_dependencies(gpu-nam-clap-host-test GpuNam_CLAP)
     add_test(NAME gpu-nam-clap-host-acceptance
