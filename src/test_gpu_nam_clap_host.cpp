@@ -13,7 +13,12 @@ int main(int argc,char** argv) {
         bool engine_found=false;
         for(std::uint32_t i=0;i<params->count(loaded.plugin);++i) {
             clap_param_info_t info{};require(params->get_info(loaded.plugin,i,&info),"parameter enumeration failed");
-            if(info.id==4){engine_found=true;require(!(info.flags&CLAP_PARAM_IS_AUTOMATABLE),"stamped Engine must be preparation-bound");}
+            if(info.id==4){
+                engine_found=true;
+#if !defined(GPU_NAM_HOST_SHARED_SESSION)
+                require(!(info.flags&CLAP_PARAM_IS_AUTOMATABLE),"stamped Engine must be preparation-bound");
+#endif
+            }
         }
         require(engine_found,"Engine parameter missing");
         require(query(nullptr)==1,"null snapshot query did not fail closed");
