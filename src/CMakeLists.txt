@@ -338,7 +338,14 @@ if(TARGET pulp::render AND TARGET pulp::gpu-audio)
             "${CMAKE_CURRENT_SOURCE_DIR}"
             "${CMAKE_CURRENT_SOURCE_DIR}/../include")
         target_compile_definitions(GpuNam_ForgeAdapter INTERFACE
-            "GPU_NAM_VERSION_STRING=\"${GPU_NAM_VERSION}\"")
+            "GPU_NAM_VERSION_STRING=\"${GPU_NAM_VERSION}\""
+            # Forge's external-consumer fixture is a development executable,
+            # not a packaged plugin.  Export the owner-selected source-tree
+            # model and asset roots with the adapter so consumers resolve the
+            # same resources as the owner tests without copying or redefining
+            # GPU-NAM's path policy.
+            "GPU_NAM_DEFAULT_MODEL_PATH=\"${GPU_NAM_MODEL}\""
+            "GPU_NAM_ASSET_DIR=\"${GPU_NAM_ASSETS}\"")
         # `pulp_add_plugin` keeps the processor implementation in an object
         # library so each format target can embed it. Propagate those objects
         # explicitly for graph consumers; an interface link alone would expose
