@@ -329,6 +329,15 @@ if(TARGET pulp::render AND TARGET pulp::gpu-audio)
             message(FATAL_ERROR
                 "GPU_NAM_BUILD_FORGE_ADAPTER requires the GpuNam_Core target")
         endif()
+        # The Forge adapter is a development-only source-tree consumer.  Its
+        # exported interface definitions reach downstream headers, but the
+        # existing processor object is compiled here and must receive the same
+        # owner-selected paths or gpu_nam_default_model_path() remains empty.
+        # Packaged plugin targets do not enable this option and continue to
+        # resolve resources relative to their bundle at runtime.
+        target_compile_definitions(GpuNam_Core PRIVATE
+            "GPU_NAM_DEFAULT_MODEL_PATH=\"${GPU_NAM_MODEL}\""
+            "GPU_NAM_ASSET_DIR=\"${GPU_NAM_ASSETS}\"")
         # The adapter is an interface target over the existing processor core.
         # Forge consumes the same NAM implementation, control authority, and
         # provider accounting; no second DSP or model registry is introduced.
