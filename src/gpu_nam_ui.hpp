@@ -92,6 +92,11 @@ public:
         : store_(store), proc_(proc), edit_(store) {
         asset_dir_ = gpu_nam_asset_dir();
         ensure_fonts();
+        // This editor is a custom-painted surface, so it has no child View
+        // controls for the host's normal focus traversal to discover. Claim
+        // focus on pointer entry and expose the settings controls through the
+        // small keyboard focus ring below.
+        set_focusable(true);
         set_continuous_repaint(true);
         set_requires_gpu_host(true);
     }
@@ -129,7 +134,14 @@ public:
     void on_mouse_up(vw::Point) override { pointer_release(); }
 
     // Open/close the settings overlay programmatically (screenshots, tests).
-    void show_settings(bool on) { show_settings_ = on; if (!on) show_slim_info_ = false; }
+    void show_settings(bool on) {
+        show_settings_ = on;
+        if (on) settings_focus_index_ = kSettingsFirstControl;
+        else {
+            show_slim_info_ = false;
+            settings_focus_index_ = -1;
+        }
+    }
     // Open/close the slim-size info popover programmatically (screenshots, tests).
     void show_slim_info(bool on) { show_slim_info_ = on; }
 
@@ -163,8 +175,111 @@ public:
     }
     vw::Point slim_info_center_for_test() const { return rect_center(settings_slim_info_); }
     bool slim_info_open_for_test() const { return show_slim_info_; }
+    int settings_focus_index_for_test() const { return settings_focus_index_; }
+
+    bool on_key_event(const vw::KeyEvent& event) override {
+        if (!event.is_down) return false;
+        if (show_settings_ && event.key == vw::KeyCode::escape) {
+            close_settings();
+            return true;
+        }
+        if (!show_settings_) return false;
+
+        if (event.key == vw::KeyCode::tab) {
+            cycle_settings_focus(event.isShiftDown() ? -1 : 1);
+            return true;
+        }
+        if (event.key == vw::KeyCode::enter || event.key == vw::KeyCode::space) {
+            activate_settings_focus();
+            return true;
+        }
+        // Segmented controls use the conventional horizontal selector gesture.
+        // Vertical arrows remain available for a future popup/dropdown owner.
+        if (event.key == vw::KeyCode::left || event.key == vw::KeyCode::right) {
+            cycle_settings_choice(event.key == vw::KeyCode::left ? -1 : 1);
+            return true;
+        }
+        return false;
+    }
 
 private:
+    static constexpr int kSettingsFirstControl = 1; // 0 is the close button
+
+    int settings_focus_count() const { return 7 + settings_slim_count_; }
+
+    vw::Rect settings_focus_rect(int index) const {
+        switch (index) {
+            case 0: return settings_close_;
+            case 1: return settings_engine_cpu_;
+            case 2: return settings_engine_gpu_;
+            case 3: return settings_output_raw_;
+            case 4: return settings_output_norm_;
+            case 5: return settings_output_cal_;
+            case 6: return settings_bypass_;
+            default:
+                if (index >= 7 && index < 7 + settings_slim_count_)
+                    return settings_slim_[static_cast<std::size_t>(index - 7)];
+                return {};
+        }
+    }
+
+    void cycle_settings_focus(int delta) {
+        const int count = settings_focus_count();
+        if (count <= 0) return;
+        int next = settings_focus_index_;
+        if (next < 0 || next >= count) next = kSettingsFirstControl;
+        else next = (next + delta + count) % count;
+        settings_focus_index_ = next;
+        request_repaint();
+    }
+
+    void activate_settings_focus() {
+        switch (settings_focus_index_) {
+            case 0: close_settings(); return;
+            case 1: set_param(kEngine, 0.0f); return;
+            case 2: set_param(kEngine, 1.0f); return;
+            case 3: set_param(kOutputMode, 0.0f); return;
+            case 4: set_param(kOutputMode, 1.0f); return;
+            case 5: set_param(kOutputMode, 2.0f); return;
+            case 6: toggle_param(kBypass); return;
+            default:
+                if (settings_focus_index_ >= 7 &&
+                    settings_focus_index_ < 7 + settings_slim_count_) {
+                    const int i = settings_focus_index_ - 7;
+                    set_param(kSize, size_for_variant(i, settings_slim_count_));
+                }
+                return;
+        }
+    }
+
+    void cycle_settings_choice(int delta) {
+        if (settings_focus_index_ == 1 || settings_focus_index_ == 2) {
+            settings_focus_index_ = settings_focus_index_ == 1 ? 2 : 1;
+            activate_settings_focus();
+        } else if (settings_focus_index_ >= 3 && settings_focus_index_ <= 5) {
+            settings_focus_index_ = 3 + (settings_focus_index_ - 3 + delta + 3) % 3;
+            activate_settings_focus();
+        } else if (settings_focus_index_ == 6) {
+            activate_settings_focus();
+        } else if (settings_focus_index_ >= 7 &&
+                   settings_focus_index_ < 7 + settings_slim_count_) {
+            const int count = settings_slim_count_;
+            settings_focus_index_ = 7 +
+                (settings_focus_index_ - 7 + delta + count) % count;
+            activate_settings_focus();
+        }
+        request_repaint();
+    }
+
+    void paint_focus_ring(cv::Canvas& canvas, const vw::Rect& rect, bool focused) {
+        if (!focused || rect.width <= 0.0f || rect.height <= 0.0f) return;
+        canvas.set_stroke_color(colors_.text);
+        canvas.set_line_width(ss(1.5f));
+        canvas.stroke_rounded_rect(rect.x - ss(3.0f), rect.y - ss(3.0f),
+                                   rect.width + ss(6.0f), rect.height + ss(6.0f),
+                                   ss(8.0f));
+    }
+
     struct KnobSpec { pulp::state::ParamID id; const char* label; float lo, hi; const char* unit; };
     static constexpr std::array<KnobSpec, nam_geom::kNumKnobs> kKnobs{{
         {kInputGain,           "Input",     -20.0f,  20.0f, "dB"},
@@ -478,6 +593,7 @@ private:
         canvas.set_text_align(cv::TextAlign::center);
         canvas.fill_text("\xC3\x97", sx(x + w - 22.0f), sy(y + 30.0f));  // ×
         canvas.set_text_align(cv::TextAlign::left);
+        paint_focus_ring(canvas, settings_close_, settings_focus_index_ == 0);
 
         const float rowL = x + 40.0f, rowW = w - 80.0f;
         const float segW = (rowW - 14.0f) * 0.5f;
@@ -493,6 +609,8 @@ private:
                              : store_.get_value(kEngine) >= 0.5f;
         settings_engine_cpu_ = seg(canvas, rowL, cy, segW, "CPU oracle", !gpu);
         settings_engine_gpu_ = seg(canvas, rowL + segW + 14.0f, cy, segW, "GPU engine", gpu);
+        paint_focus_ring(canvas, settings_engine_cpu_, settings_focus_index_ == 1);
+        paint_focus_ring(canvas, settings_engine_gpu_, settings_focus_index_ == 2);
         cy += 34.0f;
         if constexpr (nam::kGpuNamPreparationBoundEngine)
             help(canvas, rowL, cy, proc_.engine_selection_status_text());
@@ -510,6 +628,9 @@ private:
         settings_output_raw_  = seg(canvas, rowL,                        cy, osw, "Raw",        omode_i == 0);
         settings_output_norm_ = seg(canvas, rowL + (osw + 14.0f),        cy, osw, "Normalized", omode_i == 1);
         settings_output_cal_  = seg(canvas, rowL + 2.0f * (osw + 14.0f), cy, osw, "Calibrated", omode_i == 2);
+        paint_focus_ring(canvas, settings_output_raw_, settings_focus_index_ == 3);
+        paint_focus_ring(canvas, settings_output_norm_, settings_focus_index_ == 4);
+        paint_focus_ring(canvas, settings_output_cal_, settings_focus_index_ == 5);
         cy += 34.0f;
         help(canvas, rowL, cy,
              "Raw = model level \xC2\xB7 Normalized = -18 dBFS \xC2\xB7 Calibrated needs loudness metadata.");
@@ -537,6 +658,7 @@ private:
         }
         cy += 14.0f;
         settings_bypass_ = seg(canvas, rowL, cy, segW, byp ? "Bypassed" : "Active", byp);
+        paint_focus_ring(canvas, settings_bypass_, settings_focus_index_ == 6);
         if (vc > 1) {
             const float slimL = rowL + segW + 14.0f;
             const int n = std::min(vc, static_cast<int>(settings_slim_.size()));
@@ -547,6 +669,8 @@ private:
                 const char* lbl = (i == n - 1) ? "Full" : (i == 0 ? "Lite" : "Mid");
                 settings_slim_[static_cast<std::size_t>(i)] =
                     seg(canvas, slimL + static_cast<float>(i) * (sw + gap), cy, sw, lbl, i == active);
+                paint_focus_ring(canvas, settings_slim_[static_cast<std::size_t>(i)],
+                                 settings_focus_index_ == 7 + i);
             }
             settings_slim_count_ = n;
         }
@@ -658,18 +782,19 @@ private:
         pointer_down_ = true;
 
         if (show_settings_) {
-            if (in_rect(p, settings_close_)) { close_settings(); return; }
+            if (in_rect(p, settings_close_)) { settings_focus_index_ = 0; close_settings(); return; }
             if (settings_slim_count_ > 0 && in_rect(p, settings_slim_info_)) {
                 show_slim_info_ = !show_slim_info_; return;
             }
-            if (in_rect(p, settings_engine_cpu_)) { set_param(kEngine, 0.0f); return; }
-            if (in_rect(p, settings_engine_gpu_)) { set_param(kEngine, 1.0f); return; }
-            if (in_rect(p, settings_bypass_)) { toggle_param(kBypass); return; }
-            if (in_rect(p, settings_output_raw_))  { set_param(kOutputMode, 0.0f); return; }
-            if (in_rect(p, settings_output_norm_)) { set_param(kOutputMode, 1.0f); return; }
-            if (in_rect(p, settings_output_cal_))  { set_param(kOutputMode, 2.0f); return; }
+            if (in_rect(p, settings_engine_cpu_)) { settings_focus_index_ = 1; set_param(kEngine, 0.0f); return; }
+            if (in_rect(p, settings_engine_gpu_)) { settings_focus_index_ = 2; set_param(kEngine, 1.0f); return; }
+            if (in_rect(p, settings_bypass_)) { settings_focus_index_ = 6; toggle_param(kBypass); return; }
+            if (in_rect(p, settings_output_raw_))  { settings_focus_index_ = 3; set_param(kOutputMode, 0.0f); return; }
+            if (in_rect(p, settings_output_norm_)) { settings_focus_index_ = 4; set_param(kOutputMode, 1.0f); return; }
+            if (in_rect(p, settings_output_cal_))  { settings_focus_index_ = 5; set_param(kOutputMode, 2.0f); return; }
             for (int i = 0; i < settings_slim_count_; ++i)
                 if (in_rect(p, settings_slim_[static_cast<std::size_t>(i)])) {
+                    settings_focus_index_ = 7 + i;
                     set_param(kSize, size_for_variant(i, settings_slim_count_));
                     return;
                 }
@@ -683,7 +808,7 @@ private:
         }
         if (in_circle(p, sx(nam_geom::kGearX + nam_geom::kGearSz * 0.5f),
                       sy(nam_geom::kGearY + nam_geom::kGearSz * 0.5f), ss(18.0f))) {
-            show_settings_ = true; return;
+            show_settings(true); return;
         }
         // File-slot browse cluster: ‹ · › cycle through the folder, the globe
         // clears. These sit inside the slot rect, so test them first.
@@ -735,7 +860,7 @@ private:
         if (active_knob_ >= 0) { edit_.finish(); active_knob_ = -1; }
     }
 
-    void close_settings() { show_settings_ = false; show_slim_info_ = false; }
+    void close_settings() { show_settings(false); }
     void set_param(pulp::state::ParamID id, float v) {
         pulp::state::ParameterEdit t(store_);
         t.begin(id); t.set(id, v); t.finish();
@@ -784,6 +909,7 @@ private:
     bool pointer_down_ = false;
     bool show_settings_ = false;
     bool show_slim_info_ = false;              // slim-size info popover toggled open
+    int settings_focus_index_ = -1;
     vw::Rect settings_engine_cpu_{}, settings_engine_gpu_{}, settings_bypass_{},
         settings_output_raw_{}, settings_output_norm_{}, settings_output_cal_{},
         settings_close_{}, settings_slim_info_{};

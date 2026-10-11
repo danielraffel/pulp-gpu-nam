@@ -129,6 +129,39 @@ TEST_CASE("GPU NAM settings Output Mode selector picks each mode", "[nam][ui]") 
     proc->release();
 }
 
+TEST_CASE("GPU NAM settings keyboard traversal and activation", "[nam][ui][keyboard]") {
+    state::StateStore store;
+    auto proc = make_prepared(store);
+    auto v = proc->create_view();
+    auto& ui = as_ui(*v);
+    ui.set_bounds({0.0f, 0.0f, 600.0f, 400.0f});
+    ui.show_settings(true);
+
+    // The first focusable setting is CPU. Tab advances to GPU, and Enter
+    // activates the focused choice without requiring a pointer event.
+    REQUIRE(ui.settings_focus_index_for_test() == 1);
+    CHECK(ui.on_key_event({view::KeyCode::tab, 0, true, false}));
+    CHECK(ui.settings_focus_index_for_test() == 2);
+    CHECK(ui.on_key_event({view::KeyCode::enter, 0, true, false}));
+    CHECK(store.get_value(kEngine) == 1.0f);
+
+    // Shift-Tab reverses the traversal and Space activates the CPU choice.
+    CHECK(ui.on_key_event({view::KeyCode::tab, view::kModShift, true, false}));
+    CHECK(ui.settings_focus_index_for_test() == 1);
+    CHECK(ui.on_key_event({view::KeyCode::space, 0, true, false}));
+    CHECK(store.get_value(kEngine) == 0.0f);
+
+    // Horizontal arrows change a segmented choice while retaining focus.
+    CHECK(ui.on_key_event({view::KeyCode::right, 0, true, false}));
+    CHECK(ui.settings_focus_index_for_test() == 2);
+    CHECK(store.get_value(kEngine) == 1.0f);
+
+    // Escape closes the overlay and consumes the key.
+    CHECK(ui.on_key_event({view::KeyCode::escape, 0, true, false}));
+    CHECK_FALSE(ui.settings_focus_index_for_test() >= 0);
+    proc->release();
+}
+
 TEST_CASE("GPU NAM settings shows a Slim selector only for a multi-variant model", "[nam][ui][a2]") {
     const auto path = (std::filesystem::temp_directory_path() / "gpu_nam_ui_slim.nam").string();
     std::ofstream(path, std::ios::binary) << ui_slim_container();
