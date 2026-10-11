@@ -26,6 +26,8 @@ from typing import Any
 
 SCHEMA = "pulp.gpu-nam.production-receipt.v1"
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
+GIT_SHA = re.compile(r"^[0-9a-f]{40}$")
+MAX_ALLOWED_ERROR = 1.0e-3
 
 
 def sha256(path: Path) -> str:
@@ -43,6 +45,91 @@ def git_value(root: Path, *args: str) -> str:
         ).strip()
     except (OSError, subprocess.CalledProcessError):
         return "unavailable"
+
+
+def source_identity(root: Path) -> tuple[str, bool]:
+    """Return an exact, clean consumer identity; never infer it from a path."""
+    revision = git_value(root, "rev-parse", "--verify", "HEAD")
+    status = git_value(root, "status", "--porcelain", "--untracked-files=all")
+    return revision, bool(GIT_SHA.fullmatch(revision)) and status == ""
+
+
+def verify_sdk_provenance(prefix: Path, provenance: dict[str, Any]) -> list[str]:
+    """Validate the release marker and every integrity member it names."""
+    if not isinstance(provenance, dict):
+        return ["sdk provenance root must be a JSON object"]
+    failures: list[str] = []
+    required = {
+        "schema": "pulp.sdk-provenance.v1",
+        "kind": "release",
+        "profile": "official-release",
+        "distribution_eligible": True,
+        "source_git_dirty": False,
+        "build_type": "Release",
+    }
+    for key, expected in required.items():
+        if provenance.get(key) != expected:
+            failures.append(f"sdk provenance {key}={provenance.get(key)!r}, expected {expected!r}")
+    source_sha = provenance.get("source_git_sha")
+    if not isinstance(source_sha, str) or not GIT_SHA.fullmatch(source_sha):
+        failures.append("sdk provenance source_git_sha is not a full lowercase commit SHA")
+    platform_name = provenance.get("platform")
+    if not isinstance(platform_name, str) or not re.fullmatch(r"(?:darwin|linux|windows)-(?:arm64|x64)", platform_name):
+        failures.append("sdk provenance platform is missing or invalid")
+    integrity = provenance.get("integrity")
+    if not isinstance(integrity, dict) or integrity.get("schema") != "pulp.sdk-integrity.v1" or integrity.get("algorithm") != "sha256":
+        failures.append("sdk provenance is missing pulp.sdk-integrity.v1")
+    else:
+        files = integrity.get("files")
+        if not isinstance(files, dict) or not files:
+            failures.append("sdk integrity files are missing")
+        else:
+            for relative, expected_hash in files.items():
+                path = Path(relative)
+                if path.is_absolute() or ".." in path.parts or not isinstance(expected_hash, str) or not SHA256.fullmatch(expected_hash):
+                    failures.append(f"sdk integrity member is unsafe: {relative!r}")
+                    continue
+                member = prefix / path
+                try:
+                    inside_prefix = member.resolve().is_relative_to(prefix.resolve())
+                except (OSError, ValueError):
+                    inside_prefix = False
+                if member.is_symlink() or not inside_prefix:
+                    failures.append(f"sdk integrity member escapes prefix: {relative}")
+                elif not member.is_file():
+                    failures.append(f"sdk integrity member is missing: {relative}")
+                elif sha256(member) != expected_hash:
+                    failures.append(f"sdk integrity mismatch: {relative}")
+    return failures
+
+
+def parse_nonnegative_int(fields: dict[str, str], key: str) -> int | None:
+    value = fields.get(key)
+    if value is None or not re.fullmatch(r"[0-9]+", value):
+        return None
+    return int(value)
+
+
+def validate_execution(fields: dict[str, str], blocks: int) -> list[str]:
+    failures: list[str] = []
+    dropped = parse_nonnegative_int(fields, "input_dropped")
+    primed = parse_nonnegative_int(fields, "fallback_primed")
+    completions = parse_nonnegative_int(fields, "gpu_inner_completions")
+    if dropped != 0:
+        failures.append("input_dropped must be zero")
+    if primed != blocks:
+        failures.append("fallback_primed must equal requested blocks")
+    if completions is None or completions <= 0:
+        failures.append("gpu_inner_completions must be positive")
+    if not fields.get("backend", "").strip() or fields.get("backend") == "unavailable":
+        failures.append("provider backend identity must be present")
+    try:
+        error = float(fields.get("max_error", "nan"))
+    except ValueError:
+        error = float("nan")
+    if not (error >= 0.0 and error <= MAX_ALLOWED_ERROR):
+        failures.append(f"max_error must be finite and <= {MAX_ALLOWED_ERROR:g}")
+    return failures
 
 
 def parse_output(stdout: str) -> dict[str, str]:
@@ -140,13 +227,15 @@ def main() -> int:
     if not provenance_path.is_file() or not config_path.is_file():
         parser.error("--sdk-prefix must contain sdk-provenance.json and PulpConfig.cmake")
     try:
-        provenance = json.loads(provenance_path.read_text())
+        loaded_provenance = json.loads(provenance_path.read_text())
     except (OSError, ValueError) as exc:
         parser.error(f"invalid SDK provenance: {exc}")
-    if provenance.get("distribution_eligible") is not True:
-        parser.error("SDK provenance is not distribution eligible")
-
+    provenance = loaded_provenance if isinstance(loaded_provenance, dict) else {}
     source = (args.source_root or diagnostic.parent.parent).resolve()
+    source_revision, source_clean = source_identity(source)
+    provenance_failures = verify_sdk_provenance(sdk, provenance)
+    if not source_clean:
+        provenance_failures.append("consumer source is not an exact clean Git checkout")
     try:
         model_info = model_identity(model)
     except ValueError as exc:
@@ -156,13 +245,24 @@ def main() -> int:
     negative = run_diagnostic(diagnostic, model, args.blocks, True)
     positive_fields = positive["fields"]
     negative_fields = negative["fields"]
+    execution_failures = validate_execution(positive_fields, args.blocks)
+    gpu_completions = parse_nonnegative_int(positive_fields, "gpu_inner_completions") or 0
+    cpu_fallback = parse_nonnegative_int(positive_fields, "cpu_fallback") or 0
+    transport_misses = parse_nonnegative_int(positive_fields, "transport_misses") or 0
+    input_dropped = parse_nonnegative_int(positive_fields, "input_dropped")
+    parity_failures = parse_nonnegative_int(positive_fields, "parity_failures")
+    try:
+        max_error = float(positive_fields.get("max_error", "nan"))
+    except ValueError:
+        max_error = float("nan")
     positive_pass = (
         positive["exit_code"] == 0
         and positive_fields.get("diagnostic_status") == "passed"
         and positive_fields.get("provider_available") == "1"
         and positive_fields.get("direct_model_parity_failures") == "0"
         and positive_fields.get("parity_failures") == "0"
-        and int(positive_fields.get("gpu_inner_completions", "0")) > 0
+        and not execution_failures
+        and not provenance_failures
     )
     negative_pass = (
         negative["exit_code"] != 0
@@ -178,7 +278,8 @@ def main() -> int:
         "consumer": {
             "repository": "https://github.com/danielraffel/pulp-gpu-nam",
             "source_root": str(source),
-            "source_revision": git_value(source, "rev-parse", "HEAD"),
+            "source_revision": source_revision,
+            "source_clean": source_clean,
             "diagnostic": str(diagnostic),
             "diagnostic_sha256": sha256(diagnostic),
         },
@@ -189,6 +290,7 @@ def main() -> int:
             "source_git_ref": provenance.get("source_git_ref", "unavailable"),
             "provenance_sha256": sha256(provenance_path),
             "distribution_eligible": provenance.get("distribution_eligible") is True,
+            "provenance_failures": provenance_failures,
             "gpu_capabilities": provenance.get("gpu_audio", {}).get("capabilities", {}),
         },
         "model": model_info,
@@ -201,15 +303,16 @@ def main() -> int:
             "block_size": 32,
             "lead_blocks": 4,
             "requested_blocks": args.blocks,
-            "gpu_inner_completions": int(positive_fields.get("gpu_inner_completions", "0")),
-            "cpu_fallback": int(positive_fields.get("cpu_fallback", "0")),
-            "transport_misses": int(positive_fields.get("transport_misses", "0")),
-            "input_dropped": int(positive_fields.get("input_dropped", "0")),
-            "parity_failures": int(positive_fields.get("parity_failures", "-1")),
-            "max_error": float(positive_fields.get("max_error", "nan")),
+            "gpu_inner_completions": gpu_completions,
+            "cpu_fallback": cpu_fallback,
+            "transport_misses": transport_misses,
+            "input_dropped": input_dropped if input_dropped is not None else "unavailable",
+            "parity_failures": parity_failures if parity_failures is not None else "unavailable",
+            "max_error": max_error,
             "observed_path": "gpu" if positive_pass else "unknown",
             "fallback_policy": "cpu",
             "fallback_primed": int(positive_fields.get("fallback_primed", "0")) == args.blocks,
+            "validation_failures": execution_failures,
         },
         "unified_controls": {
             "source": "GpuNamProcessor::define_parameters",
