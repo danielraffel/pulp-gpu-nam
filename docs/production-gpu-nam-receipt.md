@@ -44,11 +44,26 @@ The receipt has `status: pass` only when all of these are true:
 * the typed `--inject-direct-output-error` run exits non-zero, reports a direct
   model mismatch, and still reports zero transport parity failures.
 
+The wrapper also fails closed before reporting a positive status when the
+consumer checkout is not an exact clean Git tree, the installed SDK does not
+carry official-release provenance with matching `pulp.sdk-integrity.v1` file
+hashes, or the positive diagnostic reports dropped input, an unprimed CPU
+fallback, a non-finite error, an error above `1e-3`, or no GPU completion.
+These checks protect the bounded consumer receipt from being mistaken for a
+product qualification result.
+
 The receipt records `gpu_inner_completions`, selected CPU fallback, transport
 misses, input drops, maximum oracle error, model SHA-256, executable SHA-256,
 SDK provenance SHA-256, source revisions, and host/device labels. These fields
 are evidence for that exact model/provider/device combination. They do not
 generalize to another GPU or establish a hard realtime or speedup claim.
+
+The `provider.device` labels are diagnostic host metadata from the consumer
+process. They are not a source-bound host-preflight or authenticated physical
+GPU receipt. P2/P6 acceptance must join this consumer evidence to a fresh
+source-bound Pulp host-preflight and provider observation with matching source,
+executable, SDK, model, and host hashes; this v1 wrapper does not invent that
+missing evidence.
 
 The parser and its positive/typed-negative fake-driver controls run as the
 `gpu-nam-production-receipt-contract` CTest. That gate does not substitute for
