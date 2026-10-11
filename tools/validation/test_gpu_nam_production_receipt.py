@@ -76,7 +76,12 @@ def write_release_sdk(tmp_path: Path, *, integrity: bool = True) -> Path:
     config = sdk / "lib/cmake/Pulp/PulpConfig.cmake"
     config.parent.mkdir(parents=True)
     config.write_text("# test\n")
-    members = {"lib/cmake/Pulp/PulpConfig.cmake": config}
+    members = {}
+    for name in ("include/pulp/view/widget_bridge.hpp", "lib/libpulp-view-script.a", "lib/libpulp-gpu-audio.a"):
+        member = sdk / name
+        member.parent.mkdir(parents=True, exist_ok=True)
+        member.write_text("fixture\n")
+        members[name] = member
     marker = {
         "schema": "pulp.sdk-provenance.v1",
         "kind": "release",
@@ -88,7 +93,11 @@ def write_release_sdk(tmp_path: Path, *, integrity: bool = True) -> Path:
         "source_git_dirty": False,
         "platform": "darwin-arm64",
         "build_type": "Release",
-        "gpu_audio": {"capabilities": {"shared_provider": True}},
+        "gpu_audio": {
+            "schema": "pulp.sdk-gpu-audio-capabilities.v1",
+            "capabilities": {key: True for key in ("shared_provider", "shared_convolver", "exact_provider_proof")},
+            "files": {name: hashlib.sha256(path.read_bytes()).hexdigest() for name, path in {"lib/cmake/Pulp/PulpConfig.cmake": config, "lib/libpulp-gpu-audio.a": members["lib/libpulp-gpu-audio.a"]}.items()},
+        },
     }
     if integrity:
         marker["integrity"] = {
@@ -96,7 +105,7 @@ def write_release_sdk(tmp_path: Path, *, integrity: bool = True) -> Path:
             "algorithm": "sha256",
             "files": {
                 name: hashlib.sha256(path.read_bytes()).hexdigest()
-                for name, path in members.items()
+                for name, path in members.items() if name != "lib/libpulp-gpu-audio.a"
             },
         }
     (sdk / "sdk-provenance.json").write_text(json.dumps(marker))
@@ -202,6 +211,32 @@ class ProductionReceiptTests(unittest.TestCase):
       self.assertEqual(result.returncode, 3)
       self.assertIn("consumer source", " ".join(json.loads(out.read_text())["sdk"]["provenance_failures"]))
 
+
+  def test_malformed_and_incomplete_evidence_is_fail_closed(self) -> None:
+    for mutation in ("primed", "negative_count", "gpu_audio", "capabilities", "integrity_subset"):
+      with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as raw:
+        root = Path(raw)
+        init_clean_source(root)
+        diagnostic = root / "diagnostic.py"
+        write_fake(diagnostic)
+        if mutation == "primed":
+          diagnostic.write_text(diagnostic.read_text().replace("fallback_primed=2", "fallback_primed=invalid"))
+        if mutation == "negative_count":
+          diagnostic.write_text(diagnostic.read_text().replace("direct_model_parity_failures=1", "direct_model_parity_failures=invalid"))
+        model = root / "example.nam"
+        model.write_text('{"architecture":"WaveNet","sample_rate":48000}')
+        sdk = write_release_sdk(root)
+        path = sdk / "sdk-provenance.json"
+        marker = json.loads(path.read_text())
+        if mutation == "gpu_audio": marker["gpu_audio"] = []
+        if mutation == "capabilities": marker["gpu_audio"]["capabilities"] = []
+        if mutation == "integrity_subset":
+          marker["integrity"]["files"] = {"lib/cmake/Pulp/PulpConfig.cmake": hashlib.sha256((sdk / "lib/cmake/Pulp/PulpConfig.cmake").read_bytes()).hexdigest()}
+        path.write_text(json.dumps(marker))
+        out = root / "receipt.json"
+        result = run_receipt(root, diagnostic, model, sdk, out)
+        self.assertEqual(result.returncode, 3, result.stderr)
+        self.assertEqual(json.loads(out.read_text())["status"], "fail_closed")
 
   def test_fail_closed_when_provider_is_unavailable(self) -> None:
     with tempfile.TemporaryDirectory() as raw:

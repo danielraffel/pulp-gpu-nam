@@ -37,6 +37,9 @@ The receipt has `status: pass` only when all of these are true:
 
 * the SDK has canonical `PulpConfig.cmake`, valid provenance, and
   `distribution_eligible: true`;
+* the provenance includes the authenticated GPU-audio capability receipt and
+  complete coherence/archive integrity members, all matching the installed
+  files;
 * the real bundled WaveNet model loads and the provider reports an available
   backend/device;
 * the GPU path produces at least one block, the stateful CPU oracle has zero
