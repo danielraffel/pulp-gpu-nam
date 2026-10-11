@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import platform
 import re
@@ -76,6 +77,20 @@ def verify_sdk_provenance(prefix: Path, provenance: dict[str, Any]) -> list[str]
     platform_name = provenance.get("platform")
     if not isinstance(platform_name, str) or not re.fullmatch(r"(?:darwin|linux|windows)-(?:arm64|x64)", platform_name):
         failures.append("sdk provenance platform is missing or invalid")
+    windows = isinstance(platform_name, str) and platform_name.startswith("windows-")
+    coherence_members = {"include/pulp/view/widget_bridge.hpp", "lib/pulp-view-script.lib" if windows else "lib/libpulp-view-script.a"}
+    gpu_members = {"lib/cmake/Pulp/PulpConfig.cmake", "lib/pulp-gpu-audio.lib" if windows else "lib/libpulp-gpu-audio.a"}
+    gpu_audio = provenance.get("gpu_audio")
+    if not isinstance(gpu_audio, dict) or gpu_audio.get("schema") != "pulp.sdk-gpu-audio-capabilities.v1":
+        failures.append("sdk GPU capability receipt missing or malformed")
+        gpu_audio = {}
+    capabilities = gpu_audio.get("capabilities")
+    if not isinstance(capabilities, dict) or any(capabilities.get(key) is not True for key in ("shared_provider", "shared_convolver", "exact_provider_proof")):
+        failures.append("sdk authenticated shared GPU capabilities missing or malformed")
+    gpu_files = gpu_audio.get("files")
+    if not isinstance(gpu_files, dict) or set(gpu_files) != gpu_members:
+        failures.append("sdk GPU capability integrity members incomplete")
+        gpu_files = {}
     integrity = provenance.get("integrity")
     if not isinstance(integrity, dict) or integrity.get("schema") != "pulp.sdk-integrity.v1" or integrity.get("algorithm") != "sha256":
         failures.append("sdk provenance is missing pulp.sdk-integrity.v1")
@@ -84,7 +99,12 @@ def verify_sdk_provenance(prefix: Path, provenance: dict[str, Any]) -> list[str]
         if not isinstance(files, dict) or not files:
             failures.append("sdk integrity files are missing")
         else:
-            for relative, expected_hash in files.items():
+            if set(files) != coherence_members:
+                failures.append("sdk coherence integrity members incomplete")
+            for relative in set(files) & set(gpu_files):
+                if files[relative] != gpu_files[relative]:
+                    failures.append(f"sdk integrity disagreement: {relative}")
+            for relative, expected_hash in {**files, **gpu_files}.items():
                 path = Path(relative)
                 if path.is_absolute() or ".." in path.parts or not isinstance(expected_hash, str) or not SHA256.fullmatch(expected_hash):
                     failures.append(f"sdk integrity member is unsafe: {relative!r}")
@@ -107,7 +127,10 @@ def parse_nonnegative_int(fields: dict[str, str], key: str) -> int | None:
     value = fields.get(key)
     if value is None or not re.fullmatch(r"[0-9]+", value):
         return None
-    return int(value)
+    try:
+        return int(value)
+    except ValueError:
+        return None
 
 
 def validate_execution(fields: dict[str, str], blocks: int) -> list[str]:
@@ -267,7 +290,7 @@ def main() -> int:
     negative_pass = (
         negative["exit_code"] != 0
         and negative_fields.get("diagnostic_status") == "failed"
-        and int(negative_fields.get("direct_model_parity_failures", "0")) > 0
+        and (parse_nonnegative_int(negative_fields, "direct_model_parity_failures") or 0) > 0
         and negative_fields.get("parity_failures") == "0"
     )
 
@@ -291,7 +314,8 @@ def main() -> int:
             "provenance_sha256": sha256(provenance_path),
             "distribution_eligible": provenance.get("distribution_eligible") is True,
             "provenance_failures": provenance_failures,
-            "gpu_capabilities": provenance.get("gpu_audio", {}).get("capabilities", {}),
+            "gpu_capabilities": (provenance["gpu_audio"].get("capabilities", {})
+                                 if isinstance(provenance.get("gpu_audio"), dict) and isinstance(provenance["gpu_audio"].get("capabilities"), dict) else {}),
         },
         "model": model_info,
         "provider": {
@@ -308,10 +332,10 @@ def main() -> int:
             "transport_misses": transport_misses,
             "input_dropped": input_dropped if input_dropped is not None else "unavailable",
             "parity_failures": parity_failures if parity_failures is not None else "unavailable",
-            "max_error": max_error,
+            "max_error": max_error if math.isfinite(max_error) else None,
             "observed_path": "gpu" if positive_pass else "unknown",
             "fallback_policy": "cpu",
-            "fallback_primed": int(positive_fields.get("fallback_primed", "0")) == args.blocks,
+            "fallback_primed": parse_nonnegative_int(positive_fields, "fallback_primed") == args.blocks,
             "validation_failures": execution_failures,
         },
         "unified_controls": {
