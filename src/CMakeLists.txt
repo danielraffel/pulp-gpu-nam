@@ -36,9 +36,10 @@ if(_gpu_nam_arch_defs)
     add_compile_definitions(${_gpu_nam_arch_defs})
 endif()
 
-# The CPU engines evaluate exact tanh/exp array-wide with Accelerate's vForce on
-# Apple (nam_kernels.hpp). Directory-wide for the same ODR reason as the toggles:
-# every target that compiles the inference headers must agree on the define.
+# The CPU engines' optional TanhMode::Vector evaluates tanh/exp array-wide with
+# Accelerate's vForce on Apple (nam_kernels.hpp). Directory-wide for the same ODR
+# reason as the toggles: every target that compiles the inference headers must
+# agree on the define.
 if(APPLE)
     add_compile_definitions(GPU_NAM_HAVE_ACCELERATE=1)
     link_libraries("-framework Accelerate")

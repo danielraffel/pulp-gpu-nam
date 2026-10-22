@@ -279,9 +279,11 @@ std::vector<float> rational_reference(const std::vector<float>& w, int hidden, i
 
 TEST_CASE("LSTM fast engine matches the scalar oracle", "[nam][lstm]") {
     const auto x = lstm_signal(24000);
+    for (const TanhMode mode : {TanhMode::Exact, TanhMode::Vector})
     for (int hidden : {2, 8, 24, 40}) {
-        INFO("hidden " << hidden);
+        INFO("hidden " << hidden << " vector mode " << (mode == TanhMode::Vector));
         NamLstmModel fast = seeded_lstm(hidden, 3, 0xABCu + static_cast<std::uint32_t>(hidden));
+        fast.set_tanh_mode(mode);
         NamLstmModel oracle = fast;
         REQUIRE(fast.cpu_engine() == NamLstmModel::CpuEngine::Fast);
         oracle.set_cpu_engine(NamLstmModel::CpuEngine::Oracle);
@@ -345,7 +347,7 @@ TEST_CASE("LSTM NamRational mode reproduces the rational recurrence", "[nam][lst
     REQUIRE(lstm_null_db(ref, y) > -90.0);
 }
 
-TEST_CASE("LSTM streaming is allocation-free in both tanh modes", "[nam][lstm][rt-safety]") {
+TEST_CASE("LSTM streaming is allocation-free in every tanh mode", "[nam][lstm][rt-safety]") {
     NamLstmModel m = seeded_lstm(24, 3, 0x77u);
     m.prewarm();
     const auto x = lstm_signal(4096);
@@ -354,7 +356,9 @@ TEST_CASE("LSTM streaming is allocation-free in both tanh modes", "[nam][lstm][r
     g_count_allocs = true;
     m.process(x.data(), y.data(), 2048);
     m.set_tanh_mode(TanhMode::NamRational);
-    m.process(x.data() + 2048, y.data() + 2048, 2048);
+    m.process(x.data() + 2048, y.data() + 2048, 1024);
+    m.set_tanh_mode(TanhMode::Vector);
+    m.process(x.data() + 3072, y.data() + 3072, 1024);
     g_count_allocs = false;
     REQUIRE(g_allocs.load() == 0);
 }

@@ -413,9 +413,11 @@ std::vector<std::pair<const char*, std::vector<LayerArrayConfig>>> engine_shapes
 
 TEST_CASE("block engine matches the per-sample oracle", "[nam][block]") {
     const auto x = test_signal(48000);
+    for (const TanhMode mode : {TanhMode::Exact, TanhMode::Vector})
     for (const auto& [name, arrays] : engine_shapes()) {
-        INFO("shape " << name);
+        INFO("shape " << name << " vector mode " << (mode == TanhMode::Vector));
         NamModel block = build_seeded(arrays, 0x1234u);
+        block.set_tanh_mode(mode);
         NamModel oracle = block;
         REQUIRE(block.block_engine_available());
         REQUIRE(block.cpu_engine() == NamModel::CpuEngine::Block);
@@ -525,7 +527,9 @@ TEST_CASE("block engine streaming is allocation-free", "[nam][block][rt-safety]"
     m.process(x.data() + 2048, y.data() + 2048, 33);
     for (int i = 0; i < 64; ++i) (void)m.process_sample(x[static_cast<std::size_t>(3000 + i)]);
     m.set_tanh_mode(TanhMode::NamRational);
-    m.process(x.data() + 4000, y.data() + 4000, 2000);
+    m.process(x.data() + 4000, y.data() + 4000, 1000);
+    m.set_tanh_mode(TanhMode::Vector);
+    m.process(x.data() + 5000, y.data() + 5000, 1000);
     g_count_allocs = false;
     REQUIRE(g_allocs.load() == 0);
 }

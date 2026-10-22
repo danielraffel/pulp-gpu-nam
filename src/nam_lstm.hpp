@@ -112,9 +112,11 @@ public:
         const int rows = 4 * H;
         const int cols = in_ + H;
         for (int j = 0; j < in_; ++j) xh_[static_cast<std::size_t>(j)] = x[j];
+        // z = W [x; h] + b, with the bias added after the product (GEMV grouping).
         float* z = z_.data();
-        std::copy(b_.begin(), b_.end(), z);
+        std::fill(z, z + rows, 0.0f);
         kernels::matvec_acc(wt_.data(), xh_.data(), z, rows, cols);
+        for (int r = 0; r < rows; ++r) z[r] += b_[static_cast<std::size_t>(r)];
         // Gate blocks i, f, g, o.
         kernels::sigmoid_inplace(z, static_cast<std::size_t>(2 * H), mode);
         kernels::tanh_inplace(z + 2 * H, static_cast<std::size_t>(H), mode);

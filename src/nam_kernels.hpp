@@ -25,14 +25,18 @@
 namespace pulp::examples::nam {
 
 // How the engines evaluate tanh (and, for LSTM gates, sigmoid).
-//   Exact       std::tanh / 1/(1+exp(-x)) semantics (vectorized libm-accuracy on
-//               Apple via vForce). The default; matches the scalar oracle.
+//   Exact       std::tanh and 1/(1+std::exp(-x)), element by element: the libm
+//               results a scalar implementation produces. The default.
+//   Vector      the same functions array-wide through Accelerate's vForce on
+//               Apple (within a couple of ulps of libm, several times faster);
+//               identical to Exact where vForce is unavailable. Recurrent
+//               models amplify those ulps, so it is opt-in rather than default.
 //   NamRational the rational tanh approximation NAM players use when their
 //               fast-tanh switch is on: odd, exact at 0, abs error <= 4.4e-4 for
 //               |x| <= 10 (worst near |x| = 0.58), overshooting to 1.0081 as
 //               |x| -> inf. Selecting it reproduces such a player's output; it is
 //               a different function, not a better tanh.
-enum class TanhMode { Exact, NamRational };
+enum class TanhMode { Exact, Vector, NamRational };
 
 namespace kernels {
 
@@ -54,14 +58,16 @@ inline void tanh_inplace(float* d, std::size_t n, TanhMode mode) {
         return;
     }
 #if GPU_NAM_HAVE_ACCELERATE
-    const int nn = static_cast<int>(n);
-    vvtanhf(d, d, &nn);
-#else
-    for (std::size_t i = 0; i < n; ++i) d[i] = std::tanh(d[i]);
+    if (mode == TanhMode::Vector) {
+        const int nn = static_cast<int>(n);
+        vvtanhf(d, d, &nn);
+        return;
+    }
 #endif
+    for (std::size_t i = 0; i < n; ++i) d[i] = std::tanh(d[i]);
 }
 
-// Exact logistic sigmoid 1/(1+exp(-x)); the NamRational variant is the matching
+// Logistic sigmoid 1/(1+exp(-x)); the NamRational variant is the matching
 // 0.5*(tanh(x/2)+1) built on the rational tanh.
 inline void sigmoid_inplace(float* d, std::size_t n, TanhMode mode) {
     if (mode == TanhMode::NamRational) {
@@ -69,13 +75,15 @@ inline void sigmoid_inplace(float* d, std::size_t n, TanhMode mode) {
         return;
     }
 #if GPU_NAM_HAVE_ACCELERATE
-    for (std::size_t i = 0; i < n; ++i) d[i] = -d[i];
-    const int nn = static_cast<int>(n);
-    vvexpf(d, d, &nn);
-    for (std::size_t i = 0; i < n; ++i) d[i] = 1.0f / (1.0f + d[i]);
-#else
-    for (std::size_t i = 0; i < n; ++i) d[i] = 1.0f / (1.0f + std::exp(-d[i]));
+    if (mode == TanhMode::Vector) {
+        for (std::size_t i = 0; i < n; ++i) d[i] = -d[i];
+        const int nn = static_cast<int>(n);
+        vvexpf(d, d, &nn);
+        for (std::size_t i = 0; i < n; ++i) d[i] = 1.0f / (1.0f + d[i]);
+        return;
+    }
 #endif
+    for (std::size_t i = 0; i < n; ++i) d[i] = 1.0f / (1.0f + std::exp(-d[i]));
 }
 
 // Dense product over a run of frames with a fused epilogue. For frame t the

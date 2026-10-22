@@ -201,11 +201,15 @@ private:
         return L.hist.data() + static_cast<std::size_t>(L.wpos) * C;
     }
 
+    // Sigmoids (gates and Sigmoid layers) are never the rational tanh: NAM players
+    // only swap tanh. They follow Vector when it is selected, else stay exact.
+    TanhMode gate_mode() const { return mode_ == TanhMode::Vector ? TanhMode::Vector : TanhMode::Exact; }
+
     void activate(float* d, std::size_t count, Activation a) const {
         switch (a) {
             case Activation::Tanh: kernels::tanh_inplace(d, count, mode_); return;
             case Activation::Fasttanh: kernels::tanh_inplace(d, count, mode_); return;
-            case Activation::Sigmoid: kernels::sigmoid_inplace(d, count, TanhMode::Exact); return;
+            case Activation::Sigmoid: kernels::sigmoid_inplace(d, count, gate_mode()); return;
             case Activation::Hardtanh:
                 for (std::size_t i = 0; i < count; ++i) d[i] = d[i] < -1.0f ? -1.0f : (d[i] > 1.0f ? 1.0f : d[i]);
                 return;
@@ -251,7 +255,7 @@ private:
                     for (int t = 0; t < m; ++t) {
                         float* zt = z + static_cast<std::size_t>(t) * Z;
                         activate(zt, static_cast<std::size_t>(C), L.act);
-                        kernels::sigmoid_inplace(zt + C, static_cast<std::size_t>(C), TanhMode::Exact);
+                        kernels::sigmoid_inplace(zt + C, static_cast<std::size_t>(C), gate_mode());
                         float* at = act + static_cast<std::size_t>(t) * C;
                         for (int c = 0; c < C; ++c) at[c] = zt[c] * zt[C + c];
                     }
