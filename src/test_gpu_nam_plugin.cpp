@@ -1165,9 +1165,10 @@ TEST_CASE("GPU NAM cabinet swap is click-free", "[nam][ir]") {
     }
     proc.release();
 
-    // Baseline max |Δ| over a steady pre-swap window; assert the post-swap stream
-    // never exceeds a small multiple of it (a hard-reset click would spike far
-    // higher). Skip the initial warm-up.
+    // Steady max |Δ| before the swap (cabinet A) and after the crossfade settles
+    // (cabinet B, which is brighter and louder here). The transition window must
+    // stay within a small multiple of the larger of the two: a hard-reset click
+    // spikes far above both. Skip the initial warm-up.
     auto max_delta = [&](std::size_t lo, std::size_t hi) {
         double m = 0.0;
         for (std::size_t i = lo + 1; i < hi && i < out.size(); ++i)
@@ -1175,12 +1176,15 @@ TEST_CASE("GPU NAM cabinet swap is click-free", "[nam][ir]") {
         return m;
     };
     REQUIRE(swap_at > BLOCK * 4);
-    const double baseline = max_delta(BLOCK * 2, swap_at - BLOCK);
-    const double post = max_delta(swap_at, out.size());
+    const double steady_a = max_delta(BLOCK * 2, swap_at - BLOCK);
+    const double steady_b = max_delta(out.size() - BLOCK * 10, out.size());
+    const double transition = max_delta(swap_at, swap_at + BLOCK * 6);
     for (float v : out) REQUIRE(std::isfinite(v));
-    INFO("baseline maxΔ=" << baseline << " post-swap maxΔ=" << post);
-    REQUIRE(baseline > 0.0);
-    CHECK(post < 4.0 * baseline);   // no step discontinuity at the cabinet swap
+    INFO("steady A maxΔ=" << steady_a << " steady B maxΔ=" << steady_b
+         << " transition maxΔ=" << transition);
+    REQUIRE(steady_a > 0.0);
+    REQUIRE(steady_b > 0.0);
+    CHECK(transition < 1.25 * std::max(steady_a, steady_b));   // no step at the swap
 
     std::filesystem::remove(irA);
     std::filesystem::remove(irB);
@@ -1342,17 +1346,19 @@ TEST_CASE("GPU NAM applies a loaded cabinet IR", "[nam]") {
     write_ir_wav(id_path, {1.0f});                          // identity (stays [1] after norm)
     write_ir_wav(lp_path, {0.5f, 0.5f, 0.25f, 0.12f});      // short decaying kernel
 
+    // Each stream has its own latency already trimmed. Without an IR the CPU engine
+    // may run directly on host blocks (zero latency) while an IR forces the
+    // re-block path, so compare over the length all three share.
     const auto no_ir = run_stream_cpu_ir(SR, IB, sig, "");
     const auto ident = run_stream_cpu_ir(SR, IB, sig, id_path);
     const auto decay = run_stream_cpu_ir(SR, IB, sig, lp_path);
-    REQUIRE(no_ir.size() > IB * 2);
-    REQUIRE(ident.size() == no_ir.size());
-    REQUIRE(decay.size() == no_ir.size());
+    const std::size_t n = std::min({no_ir.size(), ident.size(), decay.size()});
+    REQUIRE(n > IB * 2);
 
     // A unit-impulse IR is transparent (0-latency overlap-save): the wet chain is
     // unchanged. Proves the convolver is wired correctly, not just "does something".
     double max_id = 0.0;
-    for (std::size_t i = IB; i < no_ir.size(); ++i)
+    for (std::size_t i = IB; i < n; ++i)
         max_id = std::max(max_id, std::abs(static_cast<double>(ident[i]) - no_ir[i]));
     INFO("identity-IR max_abs_diff=" << max_id);
     REQUIRE(max_id < 1e-3);
@@ -1360,7 +1366,7 @@ TEST_CASE("GPU NAM applies a loaded cabinet IR", "[nam]") {
     // A real (multi-tap) IR is actually convolved in: the output changes and
     // stays finite.
     double diff_e = 0.0, ref_e = 0.0;
-    for (std::size_t i = IB; i < no_ir.size(); ++i) {
+    for (std::size_t i = IB; i < n; ++i) {
         REQUIRE(std::isfinite(decay[i]));
         const double d = static_cast<double>(decay[i]) - no_ir[i];
         diff_e += d * d;
@@ -1373,9 +1379,9 @@ TEST_CASE("GPU NAM applies a loaded cabinet IR", "[nam]") {
     // applied, so the output matches the no-IR path. (Guards the worker/prepare
     // exception firewall around the decode.)
     const auto bad = run_stream_cpu_ir(SR, IB, sig, "/nonexistent/pulp/no_such_ir.wav");
-    REQUIRE(bad.size() == no_ir.size());
+    REQUIRE(bad.size() >= n);
     double max_bad = 0.0;
-    for (std::size_t i = IB; i < no_ir.size(); ++i)
+    for (std::size_t i = IB; i < n; ++i)
         max_bad = std::max(max_bad, std::abs(static_cast<double>(bad[i]) - no_ir[i]));
     INFO("bad-IR-path max_abs_diff=" << max_bad);
     REQUIRE(max_bad < 1e-3);
