@@ -4,15 +4,13 @@ GPU NAM builds against the Pulp SDK vendored at `./pulp`. The submodule is pinne
 to a specific Pulp commit so a clone always builds against a known framework
 version.
 
-The current pin is Pulp SDK v0.896.0, source commit
-`d7336ebf678f4271f7240a098c542f7fdb3cb3a8`. The matching Darwin arm64 SDK
-artifact has SHA-256
-`815d8e07d309cc33bc43f3bedf5980f7da247871f29c09d2bf701c1cf0abafaf`.
+The current pin is Pulp `main` at
+`09f38fa957dcc652537911b93bfdb1195b782ecd` (Pulp 0.997.1). It includes the
+saturating WGSL tanh from Generous-Corp/pulp#10635, which keeps the GPU WaveNet
+engine finite on captures with large pre-activations.
 
-The normal installed-SDK build and consumer tests have been validated against
-the published v0.896.0 SDK. The separate manual physical-lifecycle probe stays
-restricted to its previously reviewed SDK pin until that hardware gate is
-repeated for this release.
+The earlier installed-SDK and physical-lifecycle validation records in `docs/`
+name the SDK versions they were run against; they were not repeated for this pin.
 
 ## Updating the pin
 
