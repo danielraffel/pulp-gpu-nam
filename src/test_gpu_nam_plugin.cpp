@@ -10,6 +10,7 @@
 
 #include <pulp/audio/audio_file.hpp>
 #include <pulp/format/headless.hpp>
+#include <pulp/render/gpu_compute.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/state/store.hpp>
 
@@ -127,6 +128,17 @@ template <class F>
 bool pump_until(Driver& d, int max_iter, int sleep_ms, F pred) {
     for (int i = 0; i < max_iter && !pred(); ++i) d.pump(1, sleep_ms);
     return pred();
+}
+
+// True when this machine has a GPU device the engine can use. The GPU tests
+// below skip only when there is none; with a device present, an engine that
+// fails to come up is a failure, not a skip.
+bool gpu_device_present() {
+    static const bool present = [] {
+        auto g = pulp::render::GpuCompute::create();
+        return g && g->initialize_standalone();
+    }();
+    return present;
 }
 
 void prepare_proc(GpuNamProcessor& proc, pulp::state::StateStore& store, double sr,
@@ -464,6 +476,7 @@ TEST_CASE("GPU NAM GPU engine reproduces the CPU engine", "[nam][gpu]") {
     REQUIRE(proc.gpu_engine_active());
 #endif
     if (!proc.gpu_engine_active()) {
+        REQUIRE_FALSE(gpu_device_present());
         WARN("GPU engine unavailable — skipping GPU-vs-CPU test (CPU path still covered).");
         proc.release();
         return;
@@ -581,6 +594,7 @@ TEST_CASE("GPU NAM GPU engine keeps stereo channels independent on the shared de
     REQUIRE(gpu_ready);
 #endif
     if (!gpu_ready) {
+        REQUIRE_FALSE(gpu_device_present());
         WARN("GPU engine unavailable — skipping stereo-independence test (CPU path covered).");
         return;
     }
@@ -632,6 +646,7 @@ TEST_CASE("GPU NAM switches Engine CPU->GPU->CPU live at fixed latency", "[nam][
 
     store.set_value(kEngine, 1.0f);
     if (!pump_until(d, 150, 8, [&] { return proc.gpu_engine_active(); })) {
+        REQUIRE_FALSE(gpu_device_present());
         WARN("GPU engine unavailable — skipping live-switch test.");
         proc.release();
         return;

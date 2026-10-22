@@ -1283,7 +1283,7 @@ private:
             report.prepared &&
             report.eligibility == gpu_audio::GpuAudioEligibility::Eligible;
         stack->fallback_available = report.fallback_available;
-        stack->prepared_lead_blocks = report.prepared_lead_blocks;
+        stack->prepared_lead_blocks = nam::reported_lead_blocks(report);
         if (!stack->capability_ready || !stack->fallback_available) return nullptr;
 #endif
         return stack;

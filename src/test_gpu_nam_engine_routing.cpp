@@ -63,6 +63,9 @@ int main() {
   program.provider_owned_resources = false;
   report.path = program.path;
   report.provider = program.provider;
+  // A staged transport reports no lead and the fixed delay as latency.
+  report.prepared_lead_blocks = 0;
+  report.prepared_latency_blocks = 1;
   if (bind_gpu_nam_engine_program(program, report) != GpuNamProgramError::None)
     return 9;
   std::cout

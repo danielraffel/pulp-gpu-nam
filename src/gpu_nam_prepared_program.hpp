@@ -75,6 +75,17 @@ validate_gpu_nam_program(const GpuNamPreparedProgram &program) noexcept {
   return GpuNamProgramError::None;
 }
 
+// The lead a capability report establishes. An authenticated shared-memory
+// provider reports its algorithmic lead directly. A staged transport over a
+// generic node reports no lead (prepared_lead_blocks stays 0 by SDK contract)
+// and carries its fixed delay in prepared_latency_blocks instead.
+constexpr std::uint32_t reported_lead_blocks(
+    const gpu_audio::GpuAudioCapabilityReport &capability) noexcept {
+  return capability.path == gpu_audio::GpuAudioExecutionPath::Staged
+             ? capability.prepared_latency_blocks
+             : capability.prepared_lead_blocks;
+}
+
 constexpr GpuNamProgramError validate_gpu_nam_program(
     const GpuNamPreparedProgram &program,
     const gpu_audio::GpuAudioCapabilityReport &capability) noexcept {
@@ -86,7 +97,7 @@ constexpr GpuNamProgramError validate_gpu_nam_program(
     return GpuNamProgramError::CapabilityUnavailable;
   if (capability.path != program.path ||
       capability.fallback_policy != program.miss_policy ||
-      capability.prepared_lead_blocks != program.algorithmic_lead_blocks)
+      reported_lead_blocks(capability) != program.algorithmic_lead_blocks)
     return GpuNamProgramError::CapabilityMismatch;
   if (program.miss_policy == gpu_audio::MissPolicy::CpuFallback &&
       !capability.fallback_available)

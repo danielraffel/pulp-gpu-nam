@@ -113,6 +113,12 @@ public:
         return true;
     }
 
+    // Transport witness for the CpuFallback miss policy: prepare() built the
+    // prewarmed per-channel CPU copies and the latency-aligned fallback ring.
+    bool cpu_fallback_prepared() const noexcept override {
+        return prepared_program_.cpu_fallback_prepared;
+    }
+
     const nam::GpuNamPreparedProgram& prepared_program() const noexcept {
         return prepared_program_;
     }
