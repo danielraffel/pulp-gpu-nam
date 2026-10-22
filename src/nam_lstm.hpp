@@ -117,7 +117,23 @@ public:
         std::fill(z, z + rows, 0.0f);
         kernels::matvec_acc(wt_.data(), xh_.data(), z, rows, cols);
         for (int r = 0; r < rows; ++r) z[r] += b_[static_cast<std::size_t>(r)];
-        // Gate blocks i, f, g, o.
+        // Gate blocks i, f, g, o. Exact is libm per element, so one fused pass
+        // (no vector work to batch); the other modes run array-wide passes.
+        if (mode == TanhMode::Exact || (mode == TanhMode::Vector && H < kVectorMinHidden)) {
+            float* c = c_state_.data();
+            float* hx = xh_.data() + in_;
+            for (int j = 0; j < H; ++j) {
+                const float ig = 1.0f / (1.0f + std::exp(-z[j]));
+                const float fg = 1.0f / (1.0f + std::exp(-z[H + j]));
+                const float gg = std::tanh(z[2 * H + j]);
+                const float og = 1.0f / (1.0f + std::exp(-z[3 * H + j]));
+                c[j] = fg * c[j] + ig * gg;
+                const float hn = og * std::tanh(c[j]);
+                hx[j] = hn;
+                out[j] = hn;
+            }
+            return;
+        }
         kernels::sigmoid_inplace(z, static_cast<std::size_t>(2 * H), mode);
         kernels::tanh_inplace(z + 2 * H, static_cast<std::size_t>(H), mode);
         kernels::sigmoid_inplace(z + 3 * H, static_cast<std::size_t>(H), mode);
@@ -167,6 +183,10 @@ public:
 
     int input_size() const { return in_; }
     int hidden_size() const { return h_; }
+
+    // Below this hidden size vForce's per-call overhead outweighs its speed, so
+    // Vector runs the libm pass (the more accurate one) instead.
+    static constexpr int kVectorMinHidden = 8;
 
 private:
     static float sigmoid(float x) { return 1.0f / (1.0f + std::exp(-x)); }
