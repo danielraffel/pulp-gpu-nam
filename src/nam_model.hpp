@@ -42,6 +42,7 @@
 // Activation default is "Tanh" => std::tanh (NAM's fast-tanh is an opt-in
 // approximation, off by default; this reference uses the exact std::tanh path).
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <cstddef>
@@ -52,6 +53,9 @@
 #include <vector>
 
 #include <choc/text/choc_JSON.h>
+
+#include "nam_wavenet_block.hpp"
+#include "nam_wavenet_config.hpp"
 
 namespace pulp::examples::nam {
 
@@ -159,43 +163,6 @@ private:
     std::vector<std::vector<float>> weight_;   // weight_[k][out*in_ch + in]
     std::vector<float> bias_;
     std::vector<float> history_;               // ring buffer: slots_ x in_ch_
-};
-
-enum class Activation { Tanh, Hardtanh, Fasttanh, ReLU, Sigmoid, Identity };
-
-inline Activation parse_activation(const std::string& name) {
-    if (name == "Tanh") return Activation::Tanh;
-    if (name == "Hardtanh") return Activation::Hardtanh;
-    if (name == "Fasttanh") return Activation::Fasttanh;
-    if (name == "ReLU") return Activation::ReLU;
-    if (name == "Sigmoid") return Activation::Sigmoid;
-    return Activation::Tanh;   // NAM's default activation
-}
-
-inline float apply_activation(Activation a, float x) {
-    switch (a) {
-        case Activation::Tanh: return std::tanh(x);
-        case Activation::Hardtanh: return x < -1.0f ? -1.0f : (x > 1.0f ? 1.0f : x);
-        case Activation::Fasttanh: return std::tanh(x);   // exact path; the approximation is an opt-in optimization
-
-        case Activation::ReLU: return x > 0.0f ? x : 0.0f;
-        case Activation::Sigmoid: return 1.0f / (1.0f + std::exp(-x));
-        case Activation::Identity: return x;
-    }
-    return std::tanh(x);
-}
-
-// Static per-layer-array configuration parsed from the .nam JSON.
-struct LayerArrayConfig {
-    int input_size = 1;
-    int condition_size = 1;
-    int channels = 1;
-    int kernel_size = 1;
-    std::vector<int> dilations;
-    int head_size = 1;
-    std::string activation = "Tanh";
-    bool gated = false;
-    bool head_bias = false;
 };
 
 // A single WaveNet layer: dilated conv + input-mixin + activation (optionally
@@ -351,6 +318,7 @@ public:
         in_channels_ = in_channels;
         sample_rate_ = sample_rate;
         error_.clear();
+        block_ok_ = false;
 
         if (arrays_cfg_.empty()) { error_ = "WaveNet requires at least one layer array"; return false; }
 
@@ -400,11 +368,35 @@ public:
         head_buf_b_.assign(64, 0.0f);
         layer_buf_a_.assign(64, 0.0f);
         layer_buf_b_.assign(64, 0.0f);
-        return weights_consumed_ == weights_.size();
+        if (weights_consumed_ != weights_.size()) return false;
+        block_ok_ = block_.build(arrays_cfg_, weights_.data(), weights_.size());
+        block_.set_tanh_mode(tanh_mode_);
+        return true;
     }
+
+    // Which CPU implementation process()/process_sample()/prewarm() run.
+    //   Block   the layer-major block engine (nam_wavenet_block.hpp) — the default
+    //           whenever the model's shape is covered.
+    //   Oracle  the per-sample reference forward below, kept as the readable
+    //           correctness oracle the block engine is tested against. Always
+    //           exact tanh (the tanh mode does not apply to it).
+    // Switching engines does not transfer state; reset() or prewarm() after.
+    enum class CpuEngine { Block, Oracle };
+    void set_cpu_engine(CpuEngine e) { engine_ = e; }
+    CpuEngine cpu_engine() const { return use_block() ? CpuEngine::Block : CpuEngine::Oracle; }
+    bool block_engine_available() const { return block_ok_; }
+
+    // Tanh evaluation for the block engine (see nam_kernels.hpp). Off the audio
+    // thread; takes effect on the next processed sample.
+    void set_tanh_mode(TanhMode m) {
+        tanh_mode_ = m;
+        block_.set_tanh_mode(m);
+    }
+    TanhMode tanh_mode() const { return tanh_mode_; }
 
     void reset() {
         for (LayerArray& a : arrays_) a.reset();
+        block_.reset();
     }
 
     // Samples of past input that influence the current output — the sum over every
@@ -426,8 +418,7 @@ public:
     // (it runs thousands of samples); never the audio thread.
     void prewarm() {
         reset();
-        for (std::uint64_t i = 0; i < prewarm_sample_count(); ++i)
-            process_sample(0.0f);
+        run_silence(prewarm_sample_count());
     }
 
     std::uint64_t prewarm_sample_count() const noexcept {
@@ -449,13 +440,30 @@ public:
     void prewarm_block_aligned(std::uint32_t block_size) {
         if (block_size == 0) return;
         reset();
-        const auto n = prewarm_block_count(block_size) * block_size;
-        for (long long i = 0; i < n; ++i) process_sample(0.0f);
+        run_silence(prewarm_block_count(block_size) * block_size);
     }
 
-    // One mono sample in -> one mono output sample. The per-sample core; process()
-    // wraps it for a block. Carries dilation history across calls (streaming).
+    // One mono sample in -> one mono output sample on the selected CPU engine.
+    // Carries dilation history across calls (streaming).
     float process_sample(float x) {
+        if (use_block()) {
+            float y = 0.0f;
+            block_.process(&x, &y, 1);
+            return y;
+        }
+        return oracle_process_sample(x);
+    }
+
+    void process(const float* in, float* out, std::uint32_t n) {
+        if (use_block()) {
+            block_.process(in, out, n);
+            return;
+        }
+        for (std::uint32_t i = 0; i < n; ++i) out[i] = oracle_process_sample(in[i]);
+    }
+
+    // The per-sample reference forward (the Oracle engine).
+    float oracle_process_sample(float x) {
         const float cond[1] = {x};                      // condition == raw input
         float in0[1] = {x};                             // array-0 layer input == raw input
 
@@ -487,10 +495,6 @@ public:
         return head_scale_ * (*ho_prev)[0];
     }
 
-    void process(const float* in, float* out, std::uint32_t n) {
-        for (std::uint32_t i = 0; i < n; ++i) out[i] = process_sample(in[i]);
-    }
-
     // Accessors / diagnostics.
     const std::vector<LayerArrayConfig>& arrays() const { return arrays_cfg_; }
     float head_scale() const { return head_scale_; }
@@ -508,6 +512,23 @@ public:
     const std::string& error() const { return error_; }
 
 private:
+    bool use_block() const { return block_ok_ && engine_ == CpuEngine::Block; }
+
+    void run_silence(std::uint64_t n) {
+        float zeros[WaveNetBlockEngine::kRun] = {};
+        float sink[WaveNetBlockEngine::kRun];
+        while (n > 0) {
+            const auto m = static_cast<std::uint32_t>(
+                std::min<std::uint64_t>(n, static_cast<std::uint64_t>(WaveNetBlockEngine::kRun)));
+            process(zeros, sink, m);
+            n -= m;
+        }
+    }
+
+    WaveNetBlockEngine block_;
+    bool block_ok_ = false;
+    CpuEngine engine_ = CpuEngine::Block;
+    TanhMode tanh_mode_ = TanhMode::Exact;
     std::vector<LayerArrayConfig> arrays_cfg_;
     std::vector<LayerArray> arrays_;
     std::vector<float> weights_;

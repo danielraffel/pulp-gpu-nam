@@ -3,12 +3,31 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <fstream>
+#include <new>
+#include <string>
 #include <vector>
 
 #include "nam_model.hpp"
+
+// Allocation probe: counts operator new while armed, so a test can prove the
+// streaming path is allocation-free (the audio-thread contract).
+namespace {
+std::atomic<bool> g_count_allocs{false};
+std::atomic<long> g_allocs{0};
+}  // namespace
+void* operator new(std::size_t n) {
+    if (g_count_allocs.load(std::memory_order_relaxed)) g_allocs.fetch_add(1, std::memory_order_relaxed);
+    if (void* p = std::malloc(n ? n : 1)) return p;
+    throw std::bad_alloc();
+}
+void operator delete(void* p) noexcept { std::free(p); }
+void operator delete(void* p, std::size_t) noexcept { std::free(p); }
 
 using namespace pulp::examples::nam;
 using Catch::Matchers::WithinAbs;
@@ -297,4 +316,216 @@ TEST_CASE("loader rejects a conditioned (condition_size > 1) model", "[nam]") {
     std::string err;
     REQUIRE_FALSE(load_nam(path, model, &err));
     REQUIRE(err.find("condition_size") != std::string::npos);
+}
+
+namespace {
+
+// Deterministic weights sized for the given arrays (via the model's own count).
+NamModel build_seeded(const std::vector<LayerArrayConfig>& arrays, std::uint32_t seed, float scale = 0.35f) {
+    NamModel probe;
+    probe.build(arrays, 1.0f, std::vector<float>(1, 0.0f), 1, 48000.0);
+    const std::size_t count = probe.expected_weight_count();
+    std::vector<float> w(count);
+    std::uint32_t s = seed;
+    for (auto& v : w) {
+        s = s * 1664525u + 1013904223u;
+        v = (static_cast<float>(s >> 9) / 4194304.0f - 1.0f) * scale;
+    }
+    w.back() = 0.5f;   // head_scale
+    NamModel m;
+    REQUIRE(m.build(arrays, 0.5f, std::move(w), 1, 48000.0));
+    return m;
+}
+
+LayerArrayConfig arr(int input, int channels, int head, std::vector<int> dil, bool bias, int kernel = 3,
+                     bool gated = false, const char* act = "Tanh") {
+    LayerArrayConfig a;
+    a.input_size = input;
+    a.condition_size = 1;
+    a.channels = channels;
+    a.kernel_size = kernel;
+    a.dilations = std::move(dil);
+    a.head_size = head;
+    a.head_bias = bias;
+    a.gated = gated;
+    a.activation = act;
+    return a;
+}
+
+std::vector<float> test_signal(std::size_t n) {
+    std::vector<float> x(n);
+    std::uint32_t s = 99;
+    for (std::size_t i = 0; i < n; ++i) {
+        s = s * 1664525u + 1013904223u;
+        const float noise = (static_cast<float>(s >> 9) / 4194304.0f - 1.0f);
+        x[i] = 0.5f * std::sin(0.002f * static_cast<float>(i) * (1.0f + 0.0005f * static_cast<float>(i)))
+               + 0.1f * noise;
+    }
+    x[n / 3] += 0.9f;   // a transient
+    return x;
+}
+
+// Stream x through m in the given repeating block-size pattern.
+std::vector<float> stream(NamModel& m, const std::vector<float>& x, const std::vector<std::uint32_t>& sizes) {
+    std::vector<float> y(x.size());
+    std::size_t pos = 0, k = 0;
+    while (pos < x.size()) {
+        const std::uint32_t n = static_cast<std::uint32_t>(
+            std::min<std::size_t>(sizes[k++ % sizes.size()], x.size() - pos));
+        m.process(x.data() + pos, y.data() + pos, n);
+        pos += n;
+    }
+    return y;
+}
+
+// Residual of b against a, in dB relative to a's RMS.
+double null_db(const std::vector<float>& a, const std::vector<float>& b) {
+    double e = 0, r = 0;
+    for (std::size_t i = 0; i < a.size(); ++i) {
+        const double d = static_cast<double>(b[i]) - a[i];
+        e += d * d;
+        r += static_cast<double>(a[i]) * a[i];
+    }
+    return 10.0 * std::log10((e + 1e-300) / (r + 1e-300));
+}
+
+// Shapes covering every kernel path: the trained-preset channel counts (fixed
+// kernels), a gated layer, kernel sizes 1/2, an off-table channel count (generic
+// kernel), non-tanh activations, and dilations long enough to force history
+// rewinds inside a stream.
+std::vector<std::pair<const char*, std::vector<LayerArrayConfig>>> engine_shapes() {
+    const std::vector<int> d10 = {1, 2, 4, 8, 16, 32, 64, 128, 256, 512};
+    return {
+        {"standard", {arr(1, 16, 8, d10, false), arr(16, 8, 1, d10, true)}},
+        {"lite", {arr(1, 12, 6, {1, 2, 4, 8, 16, 32, 64}, false),
+                  arr(12, 6, 1, {128, 256, 512, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512}, true)}},
+        {"nano", {arr(1, 4, 2, {1, 2, 4, 8, 16, 32, 64}, false), arr(4, 2, 1, {128, 256, 512, 1, 2}, true)}},
+        {"gated", {arr(1, 3, 2, {1, 4, 300}, false, 3, true), arr(3, 2, 1, {2, 9}, true, 3, true)}},
+        {"kernel1-kernel2", {arr(1, 6, 5, {1, 1}, true, 1), arr(6, 5, 1, {3, 700}, true, 2)}},
+        {"off-table-channels", {arr(1, 5, 7, {1, 3, 9}, false), arr(5, 7, 1, {27, 81}, true)}},
+        {"activations", {arr(1, 8, 8, {1, 2}, false, 3, false, "Hardtanh"),
+                         arr(8, 8, 4, {4}, false, 3, false, "ReLU"),
+                         arr(8, 4, 1, {8}, true, 3, false, "Sigmoid")}},
+    };
+}
+
+}  // namespace
+
+TEST_CASE("block engine matches the per-sample oracle", "[nam][block]") {
+    const auto x = test_signal(48000);
+    for (const auto& [name, arrays] : engine_shapes()) {
+        INFO("shape " << name);
+        NamModel block = build_seeded(arrays, 0x1234u);
+        NamModel oracle = block;
+        REQUIRE(block.block_engine_available());
+        REQUIRE(block.cpu_engine() == NamModel::CpuEngine::Block);
+        oracle.set_cpu_engine(NamModel::CpuEngine::Oracle);
+        REQUIRE(oracle.cpu_engine() == NamModel::CpuEngine::Oracle);
+        block.prewarm();
+        oracle.prewarm();
+        const auto yb = stream(block, x, {1, 7, 64, 200, 333, 512, 1000});
+        const auto yo = stream(oracle, x, {64});
+        // Float reassociation only: ~-125 dB on these shapes. A wrong tap, weight
+        // or bias lands near -20 dB, so -100 dB separates the two cleanly.
+        const double db = null_db(yo, yb);
+        INFO("null " << db << " dB");
+        REQUIRE(db < -100.0);
+    }
+}
+
+TEST_CASE("block engine matches the oracle on the bundled standard capture", "[nam][block]") {
+    NamModel block;
+    std::string err;
+    REQUIRE(load_nam(std::string(GPU_NAM_MODELS_DIR) + "/wavenet_a1_standard.nam", block, &err));
+    NamModel oracle = block;
+    oracle.set_cpu_engine(NamModel::CpuEngine::Oracle);
+    block.prewarm();
+    oracle.prewarm();
+    const auto x = test_signal(24000);
+    const double db = null_db(stream(oracle, x, {128}), stream(block, x, {32, 96, 511}));
+    INFO("null " << db << " dB");
+    REQUIRE(db < -100.0);
+}
+
+TEST_CASE("block engine output does not depend on how the stream is partitioned", "[nam][block]") {
+    // Each frame's sums are formed in the same order whatever the run length, so
+    // every partitioning is bit-identical, including runs that cross the internal
+    // run size and history rewinds.
+    const auto x = test_signal(20000);
+    for (const auto& [name, arrays] : engine_shapes()) {
+        INFO("shape " << name);
+        NamModel a = build_seeded(arrays, 0x77u);
+        NamModel b = a;
+        a.prewarm();
+        b.prewarm();
+        const auto ya = stream(a, x, {1});
+        const auto yb = stream(b, x, {512, 3, 129, 4096});
+        REQUIRE(ya == yb);
+    }
+}
+
+TEST_CASE("a copied block engine continues the stream identically", "[nam][block]") {
+    // The processor copies models per channel; a copy must own its history.
+    const auto x = test_signal(8000);
+    NamModel a = build_seeded(engine_shapes()[1].second, 0x99u);
+    a.prewarm();
+    std::vector<float> head(4000), tail_a(4000), tail_b(4000);
+    a.process(x.data(), head.data(), 4000);
+    NamModel b = a;
+    a.process(x.data() + 4000, tail_a.data(), 4000);
+    b.process(x.data() + 4000, tail_b.data(), 4000);
+    REQUIRE(tail_a == tail_b);
+}
+
+TEST_CASE("NamRational tanh mode evaluates the rational approximation", "[nam][block]") {
+    // Spot values of the approximation itself: odd, 0 at 0, close to tanh.
+    REQUIRE(kernels::nam_rational_tanh(0.0f) == 0.0f);
+    for (float v : {0.1f, 0.58f, 1.0f, 2.5f, 7.0f}) {
+        REQUIRE(kernels::nam_rational_tanh(-v) == -kernels::nam_rational_tanh(v));
+        REQUIRE(std::fabs(kernels::nam_rational_tanh(v) - std::tanh(v)) < 4.5e-4f);
+    }
+    REQUIRE(std::fabs(kernels::nam_rational_tanh(0.58078f) - std::tanh(0.58078f)) > 4.0e-4f);
+
+    // One tanh layer, all 1x1: the model output is a closed form in the activation.
+    LayerArrayConfig a = arr(1, 1, 1, {1}, true, 1);
+    const std::vector<float> w = {0.8f, 1.3f, -0.2f, 0.5f, 0.7f, 0.1f, 1.1f, -0.05f, 0.25f};
+    NamModel m;
+    REQUIRE(m.build({a}, 0.25f, w, 1, 48000.0));
+    auto expected = [&](float x, bool rational) {
+        const float z = (1.3f * (0.8f * x) + -0.2f) + 0.5f * x;
+        const float act = rational ? kernels::nam_rational_tanh(z) : std::tanh(z);
+        return 0.25f * (1.1f * act + -0.05f);
+    };
+    for (float x : {-0.9f, -0.3f, 0.0f, 0.4f, 1.2f}) {
+        m.set_tanh_mode(TanhMode::NamRational);
+        m.reset();
+        REQUIRE_THAT(m.process_sample(x), WithinAbs(expected(x, true), 1e-6f));
+        m.set_tanh_mode(TanhMode::Exact);
+        m.reset();
+        REQUIRE_THAT(m.process_sample(x), WithinAbs(expected(x, false), 1e-6f));
+    }
+    // Where the two functions differ by more than the tolerance, the mode must show.
+    m.set_tanh_mode(TanhMode::NamRational);
+    m.reset();
+    const float yr = m.process_sample(0.3f);
+    m.set_tanh_mode(TanhMode::Exact);
+    m.reset();
+    const float ye = m.process_sample(0.3f);
+    REQUIRE(std::fabs(yr - ye) > 1e-5f);
+}
+
+TEST_CASE("block engine streaming is allocation-free", "[nam][block][rt-safety]") {
+    NamModel m = build_seeded(engine_shapes()[0].second, 0x5u);
+    m.prewarm();
+    const auto x = test_signal(6000);
+    std::vector<float> y(x.size());
+    g_allocs = 0;
+    g_count_allocs = true;
+    m.process(x.data(), y.data(), 2048);         // longer than one internal run
+    m.process(x.data() + 2048, y.data() + 2048, 33);
+    for (int i = 0; i < 64; ++i) (void)m.process_sample(x[static_cast<std::size_t>(3000 + i)]);
+    m.set_tanh_mode(TanhMode::NamRational);
+    m.process(x.data() + 4000, y.data() + 4000, 2000);
+    g_count_allocs = false;
+    REQUIRE(g_allocs.load() == 0);
 }

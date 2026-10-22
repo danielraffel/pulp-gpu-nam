@@ -10,14 +10,32 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include <atomic>
+#include <cmath>
+#include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <new>
 #include <string>
 #include <vector>
 
 #include "nam_lstm.hpp"
 #include "nam_runtime.hpp"
+
+// Allocation probe: counts operator new while armed (audio-thread contract).
+namespace {
+std::atomic<bool> g_count_allocs{false};
+std::atomic<long> g_allocs{0};
+}  // namespace
+void* operator new(std::size_t n) {
+    if (g_count_allocs.load(std::memory_order_relaxed)) g_allocs.fetch_add(1, std::memory_order_relaxed);
+    if (void* p = std::malloc(n ? n : 1)) return p;
+    throw std::bad_alloc();
+}
+void operator delete(void* p) noexcept { std::free(p); }
+void operator delete(void* p, std::size_t) noexcept { std::free(p); }
 
 using namespace pulp::examples::nam;
 using Catch::Matchers::WithinAbs;
@@ -166,4 +184,177 @@ TEST_CASE("NamRuntime dispatches on the architecture field", "[nam][runtime]") {
     CHECK_FALSE(load_nam_runtime(cpath, rc, &cerr));
     CHECK(rc.arch() == NamRuntime::Arch::None);
     CHECK_FALSE(cerr.empty());
+}
+
+namespace {
+
+NamLstmModel seeded_lstm(int hidden, int layers, std::uint32_t seed) {
+    std::size_t count = 0;
+    for (int l = 0; l < layers; ++l) {
+        const std::size_t in = l == 0 ? 1u : static_cast<std::size_t>(hidden);
+        const std::size_t h = static_cast<std::size_t>(hidden);
+        count += 4u * h * (in + h) + 4u * h + 2u * h;
+    }
+    count += static_cast<std::size_t>(hidden) + 1u;
+    std::vector<float> w(count);
+    std::uint32_t s = seed;
+    for (auto& v : w) {
+        s = s * 1664525u + 1013904223u;
+        v = (static_cast<float>(s >> 9) / 4194304.0f - 1.0f) * 0.4f;
+    }
+    NamLstmModel m;
+    REQUIRE(m.build(1, hidden, layers, 1, std::move(w), 48000.0));
+    return m;
+}
+
+std::vector<float> lstm_signal(std::size_t n) {
+    std::vector<float> x(n);
+    for (std::size_t i = 0; i < n; ++i)
+        x[i] = 0.6f * std::sin(0.013f * static_cast<float>(i)) + 0.2f * std::sin(0.31f * static_cast<float>(i));
+    x[n / 2] += 0.8f;
+    return x;
+}
+
+double lstm_null_db(const std::vector<float>& a, const std::vector<float>& b) {
+    double e = 0, r = 0;
+    for (std::size_t i = 0; i < a.size(); ++i) {
+        const double d = static_cast<double>(b[i]) - a[i];
+        e += d * d;
+        r += static_cast<double>(a[i]) * a[i];
+    }
+    return 10.0 * std::log10((e + 1e-300) / (r + 1e-300));
+}
+
+// Scalar LSTM using the rational tanh/sigmoid, written independently of
+// LstmCell, for the NamRational mode check.
+std::vector<float> rational_reference(const std::vector<float>& w, int hidden, int layers,
+                                      const std::vector<float>& x) {
+    struct Cell { std::vector<float> W, b, h, c; int in; };
+    std::vector<Cell> cells;
+    std::size_t p = 0;
+    for (int l = 0; l < layers; ++l) {
+        Cell c;
+        c.in = l == 0 ? 1 : hidden;
+        const int rows = 4 * hidden, cols = c.in + hidden;
+        c.W.assign(w.begin() + static_cast<long>(p), w.begin() + static_cast<long>(p) + rows * cols);
+        p += static_cast<std::size_t>(rows * cols);
+        c.b.assign(w.begin() + static_cast<long>(p), w.begin() + static_cast<long>(p) + rows);
+        p += static_cast<std::size_t>(rows);
+        c.h.assign(w.begin() + static_cast<long>(p), w.begin() + static_cast<long>(p) + hidden);
+        p += static_cast<std::size_t>(hidden);
+        c.c.assign(w.begin() + static_cast<long>(p), w.begin() + static_cast<long>(p) + hidden);
+        p += static_cast<std::size_t>(hidden);
+        cells.push_back(std::move(c));
+    }
+    const std::vector<float> hw(w.begin() + static_cast<long>(p), w.begin() + static_cast<long>(p) + hidden);
+    const float hb = w[p + static_cast<std::size_t>(hidden)];
+    auto sig = [](float v) { return kernels::nam_rational_sigmoid(v); };
+    std::vector<float> y;
+    for (float xv : x) {
+        std::vector<float> v = {xv};
+        for (Cell& c : cells) {
+            std::vector<float> xh = v;
+            xh.insert(xh.end(), c.h.begin(), c.h.end());
+            std::vector<float> z(static_cast<std::size_t>(4 * hidden));
+            for (int r = 0; r < 4 * hidden; ++r) {
+                double acc = c.b[static_cast<std::size_t>(r)];
+                for (std::size_t j = 0; j < xh.size(); ++j) acc += static_cast<double>(c.W[r * xh.size() + j]) * xh[j];
+                z[static_cast<std::size_t>(r)] = static_cast<float>(acc);
+            }
+            for (int j = 0; j < hidden; ++j) {
+                const auto J = static_cast<std::size_t>(j), H = static_cast<std::size_t>(hidden);
+                c.c[J] = sig(z[H + J]) * c.c[J] + sig(z[J]) * kernels::nam_rational_tanh(z[2 * H + J]);
+                c.h[J] = sig(z[3 * H + J]) * kernels::nam_rational_tanh(c.c[J]);
+            }
+            v = c.h;
+        }
+        float out = hb;
+        for (int j = 0; j < hidden; ++j) out += hw[static_cast<std::size_t>(j)] * v[static_cast<std::size_t>(j)];
+        y.push_back(out);
+    }
+    return y;
+}
+
+}  // namespace
+
+TEST_CASE("LSTM fast engine matches the scalar oracle", "[nam][lstm]") {
+    const auto x = lstm_signal(24000);
+    for (int hidden : {2, 8, 24, 40}) {
+        INFO("hidden " << hidden);
+        NamLstmModel fast = seeded_lstm(hidden, 3, 0xABCu + static_cast<std::uint32_t>(hidden));
+        NamLstmModel oracle = fast;
+        REQUIRE(fast.cpu_engine() == NamLstmModel::CpuEngine::Fast);
+        oracle.set_cpu_engine(NamLstmModel::CpuEngine::Oracle);
+        fast.reset();
+        oracle.reset();
+        std::vector<float> yf(x.size()), yo(x.size());
+        fast.process(x.data(), yf.data(), static_cast<std::uint32_t>(x.size()));
+        oracle.process(x.data(), yo.data(), static_cast<std::uint32_t>(x.size()));
+        const double db = lstm_null_db(yo, yf);
+        INFO("null " << db << " dB");
+        REQUIRE(db < -100.0);
+    }
+}
+
+TEST_CASE("LSTM fast engine matches the oracle on the bundled capture", "[nam][lstm]") {
+    NamLstmModel fast;
+    std::string err;
+    REQUIRE(load_nam_lstm(std::string(GPU_NAM_MODELS_DIR) + "/lstm.nam", fast, &err));
+    NamLstmModel oracle = fast;
+    oracle.set_cpu_engine(NamLstmModel::CpuEngine::Oracle);
+    fast.prewarm();
+    oracle.prewarm();
+    const auto x = lstm_signal(24000);
+    std::vector<float> yf(x.size()), yo(x.size());
+    fast.process(x.data(), yf.data(), static_cast<std::uint32_t>(x.size()));
+    oracle.process(x.data(), yo.data(), static_cast<std::uint32_t>(x.size()));
+    REQUIRE(lstm_null_db(yo, yf) < -100.0);
+}
+
+TEST_CASE("LSTM NamRational mode reproduces the rational recurrence", "[nam][lstm]") {
+    const int hidden = 6, layers = 2;
+    NamLstmModel m = seeded_lstm(hidden, layers, 0x31u);
+    // Rebuild the same weights for the independent reference.
+    std::size_t count = 0;
+    for (int l = 0; l < layers; ++l) {
+        const std::size_t in = l == 0 ? 1u : static_cast<std::size_t>(hidden);
+        count += 4u * hidden * (in + hidden) + 4u * hidden + 2u * hidden;
+    }
+    count += static_cast<std::size_t>(hidden) + 1u;
+    std::vector<float> w(count);
+    std::uint32_t s = 0x31u;
+    for (auto& v : w) {
+        s = s * 1664525u + 1013904223u;
+        v = (static_cast<float>(s >> 9) / 4194304.0f - 1.0f) * 0.4f;
+    }
+    const auto x = lstm_signal(4000);
+    const auto ref = rational_reference(w, hidden, layers, x);
+
+    m.set_tanh_mode(TanhMode::NamRational);
+    m.reset();
+    std::vector<float> y(x.size());
+    m.process(x.data(), y.data(), static_cast<std::uint32_t>(x.size()));
+    const double db_rational = lstm_null_db(ref, y);
+    INFO("rational mode vs rational reference " << db_rational << " dB");
+    REQUIRE(db_rational < -100.0);
+
+    // The exact mode is a measurably different function on the same input.
+    m.set_tanh_mode(TanhMode::Exact);
+    m.reset();
+    m.process(x.data(), y.data(), static_cast<std::uint32_t>(x.size()));
+    REQUIRE(lstm_null_db(ref, y) > -90.0);
+}
+
+TEST_CASE("LSTM streaming is allocation-free in both tanh modes", "[nam][lstm][rt-safety]") {
+    NamLstmModel m = seeded_lstm(24, 3, 0x77u);
+    m.prewarm();
+    const auto x = lstm_signal(4096);
+    std::vector<float> y(x.size());
+    g_allocs = 0;
+    g_count_allocs = true;
+    m.process(x.data(), y.data(), 2048);
+    m.set_tanh_mode(TanhMode::NamRational);
+    m.process(x.data() + 2048, y.data() + 2048, 2048);
+    g_count_allocs = false;
+    REQUIRE(g_allocs.load() == 0);
 }

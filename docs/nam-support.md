@@ -6,8 +6,10 @@ Standalone), plus RTNeural/Keras (`.json`) recurrent captures.
 
 The neural inference is an **independent implementation** — written from the model
 math and the file formats, not ported from any existing implementation. It depends
-only on `choc` (JSON, via `pulp::runtime`) and the standard library — no Eigen, no
-external SDK.
+only on `choc` (JSON, via `pulp::runtime`), the standard library and, on Apple,
+Accelerate's vForce for array-wide exact `tanh`/`exp` — no Eigen, no external SDK.
+The one borrowed piece is the optional NAM-compatible rational tanh (see below),
+whose coefficients come from NeuralAmpModelerCore (MIT).
 
 ## What a `.nam` file is
 
@@ -43,7 +45,20 @@ to WaveNet A1.
 ## CPU oracle + opt-in GPU engine
 
 - **CPU engine (default).** The exact NAM forward runs inline on the audio thread,
-  re-blocked into fixed internal blocks. Always available and RT-safe.
+  re-blocked into fixed internal blocks. Always available and RT-safe (no
+  allocation while streaming). WaveNet A1 runs on a layer-major block engine
+  (`nam_wavenet_block.hpp`): each dilated-conv tap, 1x1 and head is one
+  register-blocked matrix product over a run of frames, and each activation one
+  array-wide call. LSTM runs a vectorized step (`nam_lstm.hpp`). The per-sample
+  forward remains as the correctness oracle both are tested against (and the
+  GPU engine is validated against); they agree to float rounding (better than
+  -100 dB residual, typically -125 dB).
+- **Tanh mode.** `NamRuntime::set_tanh_mode` selects `TanhMode::Exact` (the
+  default; std::tanh semantics) or `TanhMode::NamRational`, the rational tanh
+  approximation NAM players use when their fast-tanh switch is on (|error| <=
+  4.4e-4 for |x| <= 10). WaveNet A1 tanh layers and the LSTM gates honor it.
+  Selecting it reproduces such a player's output instead of the exact
+  network; it is also cheaper. The GPU engine always evaluates exact tanh.
 - **GPU engine (opt-in, WaveNet only).** The `Engine` control routes the same
   fixed blocks through Pulp's GPU audio runtime — one fused GPU forward per channel
   (`pulp::render::GpuCompute::wavenet_forward`) on a non-real-time worker, with a

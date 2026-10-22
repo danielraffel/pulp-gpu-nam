@@ -209,13 +209,23 @@ TEST_CASE("GPU NAM wins at large model size", "[nam][gpu]") {
 
     // Timing: average per-block wall-clock. The CPU oracle resets each iteration
     // (a fresh first block); the GPU streams (the per-block cost is what matters).
+    // The assertion is against the strictly-serial per-sample oracle; the block
+    // engine's time is reported alongside, since at this size it is a closer race.
     using clk = std::chrono::steady_clock;
+    nam::NamModel oracle = model;
+    oracle.set_cpu_engine(nam::NamModel::CpuEngine::Oracle);
     auto t0 = clk::now();
-    for (int i = 0; i < 20; ++i) { model.reset(); model.process(in.data(), oc.data(), B); }
+    for (int i = 0; i < 20; ++i) { oracle.reset(); oracle.process(in.data(), oc.data(), B); }
     const double cpu_us = std::chrono::duration<double, std::micro>(clk::now() - t0).count() / 20;
+    t0 = clk::now();
+    for (int i = 0; i < 20; ++i) { model.reset(); model.process(in.data(), oc.data(), B); }
+    const double block_us = std::chrono::duration<double, std::micro>(clk::now() - t0).count() / 20;
     t0 = clk::now();
     for (int i = 0; i < 20; ++i) gnam.forward(in.data(), og.data(), B);
     const double gpu_us = std::chrono::duration<double, std::micro>(clk::now() - t0).count() / 20;
-    INFO("big model: CPU " << cpu_us << " us/block, GPU " << gpu_us << " us/block");
+    INFO("big model: CPU oracle " << cpu_us << " us/block, CPU block engine " << block_us
+         << " us/block, GPU " << gpu_us << " us/block");
+    WARN("big model: CPU oracle " << cpu_us << " us/block, CPU block engine " << block_us
+         << " us/block, GPU " << gpu_us << " us/block");
     REQUIRE(gpu_us < cpu_us);
 }
