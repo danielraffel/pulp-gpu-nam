@@ -38,7 +38,10 @@ layer. At small models the CPU is still faster (the round-trip dominates); as th
 capture grows, the GPU's parallelism pulls ahead while the CPU falls behind
 real time. The bundled example is small, so **the CPU engine is the honest default
 here** — the GPU engine is there to switch on for large captures and to show the
-architecture. Both are validated bit-for-bit against each other.
+architecture. The GPU engine evaluates exact tanh and matches the CPU engine's
+exact mode to float rounding. The CPU engine plays NAM's rational fast-tanh by
+default (what NAM players with fast tanh on produce, and cheaper), so switching
+engines moves between the two by that approximation's error.
 
 ## Install (macOS, Apple Silicon)
 

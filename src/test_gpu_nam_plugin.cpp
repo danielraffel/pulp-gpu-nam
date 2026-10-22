@@ -365,6 +365,52 @@ TEST_CASE("GPU NAM CPU engine produces finite non-trivial amped output", "[nam]"
     REQUIRE(energy > 1e-4);   // the amp produced real output
 }
 
+TEST_CASE("GPU NAM CPU engine evaluates the NAM-compatible rational tanh", "[nam]") {
+    // The published CPU engine (the objects the audio thread runs) carries the
+    // rational mode after prepare and after a reload. The transfer curve is drawn
+    // in the same mode, so it equals a NamRational curve of the bundled model and
+    // differs from the Exact curve by the approximation's error.
+    GpuNamProcessor proc;
+    pulp::state::StateStore store;
+    prepare_proc(proc, store, 48000.0, GpuNamProcessor::kInternalBlock, /*engine=*/0.0f);
+    REQUIRE(GpuNamProcessor::kCpuTanhMode == nam::TanhMode::NamRational);
+    REQUIRE(proc.cpu_engine_tanh_mode() == nam::TanhMode::NamRational);
+    {
+        Driver d(proc, GpuNamProcessor::kInternalBlock, 48000.0);
+        proc.load_model("");   // rebuilds the CPU engine on the worker
+        d.pump(20, 5);
+    }
+    REQUIRE(proc.cpu_engine_tanh_mode() == nam::TanhMode::NamRational);
+
+    auto curve_for = [](nam::TanhMode mode) {
+        nam::NamRuntime m;
+        std::string err;
+        REQUIRE(nam::load_nam_runtime(GPU_NAM_DEFAULT_MODEL_PATH, m, &err));
+        m.set_tanh_mode(mode);
+        TransferCurve c{};
+        for (int p = 0; p < kCurvePoints; ++p) {
+            const float x = -kCurveRange + 2.0f * kCurveRange * p / (kCurvePoints - 1);
+            m.reset();
+            float y = 0.0f;
+            for (int i = 0; i < 1024; ++i) y = m.process_sample(x);
+            c[static_cast<std::size_t>(p)] = y;
+        }
+        return c;
+    };
+    const TransferCurve played = proc.transfer_curve_snapshot();
+    const TransferCurve rational = curve_for(nam::TanhMode::NamRational);
+    const TransferCurve exact = curve_for(nam::TanhMode::Exact);
+    float max_vs_rational = 0.0f, max_vs_exact = 0.0f;
+    for (std::size_t i = 0; i < played.size(); ++i) {
+        max_vs_rational = std::max(max_vs_rational, std::fabs(played[i] - rational[i]));
+        max_vs_exact = std::max(max_vs_exact, std::fabs(played[i] - exact[i]));
+    }
+    INFO("max |played - rational| = " << max_vs_rational << ", max |played - exact| = " << max_vs_exact);
+    REQUIRE(max_vs_rational == 0.0f);
+    REQUIRE(max_vs_exact > 1e-6f);
+    proc.release();
+}
+
 TEST_CASE("GPU NAM bypass passes the dry signal", "[nam]") {
     constexpr std::size_t BLOCK = GpuNamProcessor::kInternalBlock;
     constexpr double SR = 48000.0;

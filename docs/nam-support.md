@@ -67,7 +67,16 @@ to WaveNet A1.
     Selecting it reproduces such a player's output instead of the exact
     network, and it is the cheapest.
 
-  The GPU engine always evaluates exact tanh.
+  The plugin's inline CPU engine runs `NamRational` (`GpuNamProcessor::kCpuTanhMode`):
+  it reproduces the audio of NAM players with fast tanh on and is faster than them,
+  while `Exact` would be slower than those players. The GPU engine and its CPU
+  fallback copies always evaluate exact tanh.
+
+  Known issue: on the pinned Pulp SDK the GPU WaveNet's WGSL `tanh()` returns NaN
+  for large pre-activations on the Metal backend, so the opt-in GPU engine can emit
+  non-finite audio on some real captures. The fix (clamping the argument) is
+  Generous-Corp/pulp#10635; bump the `pulp` submodule pin once it lands. The CPU
+  engine is unaffected.
 - **GPU engine (opt-in, WaveNet only).** The `Engine` control routes the same
   fixed blocks through Pulp's GPU audio runtime — one fused GPU forward per channel
   (`pulp::render::GpuCompute::wavenet_forward`) on a non-real-time worker, with a
