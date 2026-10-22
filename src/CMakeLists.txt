@@ -36,6 +36,15 @@ if(_gpu_nam_arch_defs)
     add_compile_definitions(${_gpu_nam_arch_defs})
 endif()
 
+# The CPU engines' optional TanhMode::Vector evaluates tanh/exp array-wide with
+# Accelerate's vForce on Apple (nam_kernels.hpp). Directory-wide for the same ODR
+# reason as the toggles: every target that compiles the inference headers must
+# agree on the define.
+if(APPLE)
+    add_compile_definitions(GPU_NAM_HAVE_ACCELERATE=1)
+    link_libraries("-framework Accelerate")
+endif()
+
 if(TARGET Catch2::Catch2WithMain)
     add_executable(gpu-nam-gpu-cpu-diagnostic-options-test
         test_gpu_nam_gpu_cpu_diagnostic_options.cpp)
@@ -109,6 +118,8 @@ if(TARGET pulp::runtime)
             add_executable(gpu-nam-model-test test_nam_model.cpp)
             target_link_libraries(gpu-nam-model-test PRIVATE pulp::runtime Catch2::Catch2WithMain)
             target_include_directories(gpu-nam-model-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+            target_compile_definitions(gpu-nam-model-test PRIVATE
+                GPU_NAM_MODELS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/models")
             add_test(NAME gpu-nam-model-test COMMAND gpu-nam-model-test)
         endif()
 
@@ -133,6 +144,8 @@ if(TARGET pulp::runtime)
             add_executable(gpu-nam-lstm-test test_nam_lstm.cpp)
             target_link_libraries(gpu-nam-lstm-test PRIVATE pulp::runtime Catch2::Catch2WithMain)
             target_include_directories(gpu-nam-lstm-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+            target_compile_definitions(gpu-nam-lstm-test PRIVATE
+                GPU_NAM_MODELS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/models")
             add_test(NAME gpu-nam-lstm-test COMMAND gpu-nam-lstm-test)
         endif()
 
@@ -216,7 +229,7 @@ if(TARGET pulp::render AND TARGET pulp::gpu-audio)
     # Standalone plists), the custom AU plist (below), and the processor
     # descriptor (GPU_NAM_VERSION_STRING compile define) so the three can't drift
     # — the AU plist silently froze at 1.0.0 before this was centralized.
-    set(GPU_NAM_VERSION "1.2.5")
+    set(GPU_NAM_VERSION "1.3.0")
     add_compile_definitions(GPU_NAM_VERSION_STRING="${GPU_NAM_VERSION}")
 
     set(_gpu_nam_experimental_sources)

@@ -139,6 +139,13 @@ public:
     // 48 kHz; the re-block FIFO adds this much latency, reported for host PDC.
     static constexpr std::size_t kInternalBlock = 512;
 
+    // Tanh evaluation for the inline CPU engine (nam_kernels.hpp). NamRational
+    // reproduces what NAM players with fast tanh enabled output, and is the
+    // cheapest mode; Exact (libm) is the reference-accuracy alternative. The GPU
+    // engine and its fallback copies always evaluate exact tanh, so switching the
+    // Engine control moves between the two by the approximation's error.
+    static constexpr nam::TanhMode kCpuTanhMode = nam::TanhMode::NamRational;
+
     // Engine=Auto offloads to the GPU only when the measured CPU inference exceeds
     // this fraction of one internal block's real-time budget.
     static constexpr double kAutoGpuBudgetFraction = 0.5;
@@ -457,6 +464,13 @@ public:
     /// shipped demo; a GPU_NAM_WITH_LICENSE build reports Registered / Unregistered.
     std::string license_status() const { return license_.status_text(); }
 
+    /// Tanh mode of the published inline CPU engine (Exact when none is
+    /// published). Diagnostic; reads the same pointer the audio thread uses.
+    nam::TanhMode cpu_engine_tanh_mode() const {
+        const CpuEngine* cpu = cpu_active_.load(std::memory_order_acquire);
+        return cpu ? cpu->model[0].tanh_mode() : nam::TanhMode::Exact;
+    }
+
     /// Snapshot of the input→output transfer ("amp character") curve. UI-thread
     /// only — never the audio thread.
     TransferCurve transfer_curve_snapshot() const {
@@ -598,10 +612,7 @@ public:
         // audio thread via cpu_active_ (built/freed only off the audio thread).
         {
             auto cpu = std::make_unique<CpuEngine>();
-            for (std::size_t ch = 0; ch < kChannels; ++ch) {
-                cpu->model[ch] = model;
-                cpu->model[ch].prewarm();   // silence steady-state — no cold-start thump
-            }
+            for (std::size_t ch = 0; ch < kChannels; ++ch) prepare_cpu_model(cpu->model[ch], model);
             current_cpu_ = std::move(cpu);
             cpu_active_.store(current_cpu_.get(), std::memory_order_seq_cst);
             // Re-arm the dual-mono fast path for the new engine. The audio-thread
@@ -1272,7 +1283,7 @@ private:
             report.prepared &&
             report.eligibility == gpu_audio::GpuAudioEligibility::Eligible;
         stack->fallback_available = report.fallback_available;
-        stack->prepared_lead_blocks = report.prepared_lead_blocks;
+        stack->prepared_lead_blocks = nam::reported_lead_blocks(report);
         if (!stack->capability_ready || !stack->fallback_available) return nullptr;
 #endif
         return stack;
@@ -1328,16 +1339,21 @@ private:
         model_has_loudness_.store(has, std::memory_order_release);
     }
 
+    // Copy `model` into an inline CPU engine slot in the CPU tanh mode and settle
+    // it at its silence steady-state (no cold-start thump). Off the audio thread.
+    static void prepare_cpu_model(nam::NamRuntime& slot, const nam::NamRuntime& model) {
+        slot = model;
+        slot.set_tanh_mode(kCpuTanhMode);
+        slot.prewarm();
+    }
+
     // Worker-thread only. Publish a fresh inline CPU engine for `model`, retiring
     // the old one (freed one rebuild later).
     void rebuild_cpu_engine(const nam::NamRuntime& model) {
         cpu_active_.store(nullptr, std::memory_order_seq_cst);   // unpublish before retiring
         retire_engine(std::shared_ptr<void>(std::move(current_cpu_)));
         auto cpu = std::make_unique<CpuEngine>();
-        for (std::size_t ch = 0; ch < kChannels; ++ch) {
-            cpu->model[ch] = model;
-            cpu->model[ch].prewarm();   // silence steady-state — no cold-start thump
-        }
+        for (std::size_t ch = 0; ch < kChannels; ++ch) prepare_cpu_model(cpu->model[ch], model);
         current_cpu_ = std::move(cpu);
         cpu_active_.store(current_cpu_.get(), std::memory_order_seq_cst);
     }
@@ -1352,6 +1368,7 @@ private:
             std::lock_guard<std::mutex> lock(model_mutex_);
             m = model_;
         }
+        m.set_tanh_mode(kCpuTanhMode);   // draw what the CPU engine plays
         TransferCurve curve{};
         if (loaded_ok_ && m.ok()) {
             constexpr int settle = 1024;

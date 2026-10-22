@@ -51,6 +51,7 @@
 
 #include <choc/text/choc_JSON.h>
 
+#include "nam_kernels.hpp"
 #include "nam_model.hpp"   // detail::num, detail::parse_int (shared loader helpers)
 
 namespace pulp::examples::nam {
@@ -73,6 +74,8 @@ public:
         c_state_.assign(static_cast<std::size_t>(h_), 0.0f);
         xh_.assign(cols, 0.0f);
         z_.assign(rows, 0.0f);
+        wt_.assign(rows * cols, 0.0f);
+        c_tanh_.assign(static_cast<std::size_t>(h_), 0.0f);
     }
 
     std::size_t weight_count() const {
@@ -89,14 +92,67 @@ public:
         for (std::size_t r = 0; r < rows; ++r) b_[r] = *p++;
         for (int j = 0; j < h_; ++j) h0_[static_cast<std::size_t>(j)] = *p++;
         for (int j = 0; j < h_; ++j) c0_[static_cast<std::size_t>(j)] = *p++;
+        // Transposed copy for the vectorized step: wt_[col*rows + row].
+        for (std::size_t r = 0; r < rows; ++r)
+            for (std::size_t c = 0; c < cols; ++c) wt_[c * rows + r] = w_[r * cols + c];
         reset();
     }
 
     void reset() {
         h_state_ = h0_;
         c_state_ = c0_;
+        for (int j = 0; j < h_; ++j) xh_[static_cast<std::size_t>(in_ + j)] = h0_[static_cast<std::size_t>(j)];
     }
 
+    // Vectorized step: one tiled matvec over [x; h] and array-wide gate
+    // activations. Same recurrence as step(); `mode` selects exact or the
+    // NAM-compatible rational tanh/sigmoid. Allocation-free.
+    void step_fast(const float* x, float* out, TanhMode mode) {
+        const int H = h_;
+        const int rows = 4 * H;
+        const int cols = in_ + H;
+        for (int j = 0; j < in_; ++j) xh_[static_cast<std::size_t>(j)] = x[j];
+        // z = W [x; h] + b, with the bias added after the product (GEMV grouping).
+        float* z = z_.data();
+        std::fill(z, z + rows, 0.0f);
+        kernels::matvec_acc(wt_.data(), xh_.data(), z, rows, cols);
+        for (int r = 0; r < rows; ++r) z[r] += b_[static_cast<std::size_t>(r)];
+        // Gate blocks i, f, g, o. Exact is libm per element, so one fused pass
+        // (no vector work to batch); the other modes run array-wide passes.
+        if (mode == TanhMode::Exact || (mode == TanhMode::Vector && H < kVectorMinHidden)) {
+            float* c = c_state_.data();
+            float* hx = xh_.data() + in_;
+            for (int j = 0; j < H; ++j) {
+                const float ig = 1.0f / (1.0f + std::exp(-z[j]));
+                const float fg = 1.0f / (1.0f + std::exp(-z[H + j]));
+                const float gg = std::tanh(z[2 * H + j]);
+                const float og = 1.0f / (1.0f + std::exp(-z[3 * H + j]));
+                c[j] = fg * c[j] + ig * gg;
+                const float hn = og * std::tanh(c[j]);
+                hx[j] = hn;
+                out[j] = hn;
+            }
+            return;
+        }
+        kernels::sigmoid_inplace(z, static_cast<std::size_t>(2 * H), mode);
+        kernels::tanh_inplace(z + 2 * H, static_cast<std::size_t>(H), mode);
+        kernels::sigmoid_inplace(z + 3 * H, static_cast<std::size_t>(H), mode);
+        float* c = c_state_.data();
+        float* tc = c_tanh_.data();
+        for (int j = 0; j < H; ++j) {
+            c[j] = z[H + j] * c[j] + z[j] * z[2 * H + j];
+            tc[j] = c[j];
+        }
+        kernels::tanh_inplace(tc, static_cast<std::size_t>(H), mode);
+        float* hx = xh_.data() + in_;
+        for (int j = 0; j < H; ++j) {
+            const float hn = z[3 * H + j] * tc[j];
+            hx[j] = hn;
+            out[j] = hn;
+        }
+    }
+
+    // Reference step (the oracle): per-row dot products and scalar std::tanh/exp.
     // x: in_ values -> writes h_ output values (the new hidden state) to out.
     void step(const float* x, float* out) {
         const std::size_t cols = static_cast<std::size_t>(in_ + h_);
@@ -128,6 +184,10 @@ public:
     int input_size() const { return in_; }
     int hidden_size() const { return h_; }
 
+    // Below this hidden size vForce's per-call overhead outweighs its speed, so
+    // Vector runs the libm pass (the more accurate one) instead.
+    static constexpr int kVectorMinHidden = 8;
+
 private:
     static float sigmoid(float x) { return 1.0f / (1.0f + std::exp(-x)); }
 
@@ -136,7 +196,9 @@ private:
     std::vector<float> b_;        // [4h]
     std::vector<float> h0_, c0_;  // stored reset state
     std::vector<float> h_state_, c_state_;
-    std::vector<float> xh_, z_;   // scratch
+    std::vector<float> xh_, z_;   // scratch; xh_'s tail is the live hidden state for step_fast
+    std::vector<float> wt_;       // W transposed [(in+h) x 4h] for step_fast
+    std::vector<float> c_tanh_;   // scratch
 };
 
 // The full NAM LSTM model: a stack of cells + a linear head over the last hidden
@@ -215,6 +277,15 @@ public:
         for (LstmCell& c : cells_) c.reset();
     }
 
+    // Fast (vectorized step_fast, the default) or Oracle (the scalar reference
+    // step). Switching does not transfer state; reset() or prewarm() after.
+    enum class CpuEngine { Fast, Oracle };
+    void set_cpu_engine(CpuEngine e) { engine_ = e; }
+    CpuEngine cpu_engine() const { return engine_; }
+    // Tanh/sigmoid evaluation for the Fast engine; the Oracle is always exact.
+    void set_tanh_mode(TanhMode m) { tanh_mode_ = m; }
+    TanhMode tanh_mode() const { return tanh_mode_; }
+
     // Settle at the silence steady-state (reset to the stored initial state, then
     // run silence). The stored (h0,c0) is the trained initial state, not necessarily
     // the true silence attractor, and a slow-state LSTM (bass amps, compressors) can
@@ -234,8 +305,10 @@ public:
         const float* layer_in = in0;
         std::vector<float>* cur = &hbuf_a_;
         std::vector<float>* prev = &hbuf_b_;
+        const bool fast = engine_ == CpuEngine::Fast;
         for (std::size_t l = 0; l < cells_.size(); ++l) {
-            cells_[l].step(layer_in, cur->data());
+            if (fast) cells_[l].step_fast(layer_in, cur->data(), tanh_mode_);
+            else cells_[l].step(layer_in, cur->data());
             layer_in = cur->data();
             std::swap(cur, prev);
         }
@@ -262,6 +335,8 @@ public:
 
 private:
     int input_size_ = 1, hidden_size_ = 1, num_layers_ = 1, out_size_ = 1;
+    CpuEngine engine_ = CpuEngine::Fast;
+    TanhMode tanh_mode_ = TanhMode::Exact;
     std::vector<LstmCell> cells_;
     std::vector<float> head_w_, head_b_;
     std::vector<float> weights_;

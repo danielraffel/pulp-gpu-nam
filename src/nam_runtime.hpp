@@ -55,6 +55,8 @@
 #include "nam_linear.hpp"
 #endif
 
+#include "nam_kernels.hpp"
+
 #include <cmath>
 #include <cstdint>
 #include <fstream>
@@ -186,6 +188,20 @@ public:
         for (std::uint32_t i = 0; i < n; ++i) out[i] = in[i];
     }
 
+    // Tanh evaluation for the CPU engines that have a mode (WaveNet A1, LSTM):
+    // Exact (default) or the NAM-compatible rational approximation. Other
+    // architectures ignore it. Off the audio thread.
+    void set_tanh_mode(TanhMode m) {
+        tanh_mode_ = m;
+#if GPU_NAM_WITH_WAVENET
+        wavenet_.set_tanh_mode(m);
+#endif
+#if GPU_NAM_WITH_LSTM
+        lstm_.set_tanh_mode(m);
+#endif
+    }
+    TanhMode tanh_mode() const { return tanh_mode_; }
+
     // Number of selectable size variants. > 1 only for a packed SlimmableContainer
     // (A2-Full / A2-Lite / ...); every other model — including a bare A2 WaveNet —
     // reports 1, so the plugin shows the "Slim" control only when it does something.
@@ -265,6 +281,7 @@ private:
 #if GPU_NAM_WITH_LINEAR
     NamLinearModel linear_;
 #endif
+    TanhMode tanh_mode_ = TanhMode::Exact;
     std::string error_;
     bool has_loudness_ = false;
     double loudness_db_ = 0.0;
@@ -336,6 +353,7 @@ inline bool load_nam_runtime(const std::string& path, NamRuntime& out, std::stri
         if (!load_nam_a2(path, out.a2_, &err)) return fail(err);
         out.arch_ = NamRuntime::Arch::WaveNetA2;
         out.error_.clear();
+        out.set_tanh_mode(out.tanh_mode_);
         return true;
 #else
         return fail("architecture 'WaveNet-A2' is not compiled into this build");
@@ -346,6 +364,7 @@ inline bool load_nam_runtime(const std::string& path, NamRuntime& out, std::stri
         if (!load_nam(path, out.wavenet_, &err)) return fail(err);
         out.arch_ = NamRuntime::Arch::WaveNet;
         out.error_.clear();
+        out.set_tanh_mode(out.tanh_mode_);
         return true;
     }
 #endif
@@ -354,6 +373,7 @@ inline bool load_nam_runtime(const std::string& path, NamRuntime& out, std::stri
         if (!load_nam_lstm(path, out.lstm_, &err)) return fail(err);
         out.arch_ = NamRuntime::Arch::Lstm;
         out.error_.clear();
+        out.set_tanh_mode(out.tanh_mode_);
         return true;
     }
 #endif
@@ -362,6 +382,7 @@ inline bool load_nam_runtime(const std::string& path, NamRuntime& out, std::stri
         if (!load_nam_linear(path, out.linear_, &err)) return fail(err);
         out.arch_ = NamRuntime::Arch::Linear;
         out.error_.clear();
+        out.set_tanh_mode(out.tanh_mode_);
         return true;
     }
 #endif
@@ -370,6 +391,7 @@ inline bool load_nam_runtime(const std::string& path, NamRuntime& out, std::stri
         if (!load_nam_convnet(path, out.convnet_, &err)) return fail(err);
         out.arch_ = NamRuntime::Arch::ConvNet;
         out.error_.clear();
+        out.set_tanh_mode(out.tanh_mode_);
         return true;
     }
 #endif

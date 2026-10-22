@@ -42,6 +42,10 @@ class GpuNamSharedSessionNode final : public gpu_audio::GpuAudioNode {
                               audio::BufferView<float>& output,
                               std::uint32_t n) noexcept override;
 
+    // Transport witness for the CpuFallback miss policy: set once prepare()
+    // has built the continuously fed CPU fallback.
+    bool cpu_fallback_prepared() const noexcept override { return prepared_; }
+
     bool gpu_available() const noexcept {
         return prepared_ && channels_ > 0 && channels_ <= kMaxNamChannels &&
                sessions_[0] != nullptr && (channels_ == 1 || sessions_[1] != nullptr);

@@ -26,7 +26,10 @@ https://github.com/sdatkinson/NeuralAmpModelerCore). Pulp's inference
 (`src/nam_model.hpp`, `nam_a2.hpp`, `nam_convnet.hpp`, `nam_lstm.hpp`,
 `nam_linear.hpp`, `keras_runtime.hpp`) and GPU forward
 (`GpuCompute::wavenet_forward`) are independent implementations of those
-public architectures; these `.nam` files are the only third-party artifacts.
+public architectures. The third-party pieces are these `.nam` files and the
+coefficients of the optional NAM-compatible rational tanh in `nam_kernels.hpp`
+(`nam_rational_tanh`), taken from NeuralAmpModelerCore's `activations.h`
+(MIT, Copyright (c) 2023 Steven Atkinson).
 
 ## Supported model architectures
 

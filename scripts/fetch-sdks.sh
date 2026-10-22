@@ -3,9 +3,8 @@
 # need. CLAP and the Standalone app build without any external SDK; run this only
 # if you want the VST3 and/or AU formats.
 #
-# Both SDKs are permissively licensed (VST3 SDK: dual GPL/proprietary — Pulp uses
-# it under the proprietary/Steinberg terms for MIT-compatible distribution; AU:
-# Apache-2.0) and are developer-supplied — they are NOT vendored in this repo.
+# Both SDKs are permissively licensed (VST3 SDK 3.8: MIT; AU: Apache-2.0) and are
+# developer-supplied — they are NOT vendored in this repo.
 # They clone into the Pulp submodule's external/ dir, where Pulp's build expects
 # them.
 #
@@ -23,7 +22,7 @@ fi
 mkdir -p "$ext"
 
 # Pin the same refs Pulp itself uses (see pulp/tools/deps/manifest.json).
-VST3_REF="v3.7.12_build_20"
+VST3_REF="v3.8.0_build_66"
 
 if [[ -d "$ext/vst3sdk/.git" ]]; then
   echo "vst3sdk already present ($ext/vst3sdk)"

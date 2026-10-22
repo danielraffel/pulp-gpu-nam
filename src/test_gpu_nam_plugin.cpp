@@ -10,6 +10,7 @@
 
 #include <pulp/audio/audio_file.hpp>
 #include <pulp/format/headless.hpp>
+#include <pulp/render/gpu_compute.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/state/store.hpp>
 
@@ -127,6 +128,17 @@ template <class F>
 bool pump_until(Driver& d, int max_iter, int sleep_ms, F pred) {
     for (int i = 0; i < max_iter && !pred(); ++i) d.pump(1, sleep_ms);
     return pred();
+}
+
+// True when this machine has a GPU device the engine can use. The GPU tests
+// below skip only when there is none; with a device present, an engine that
+// fails to come up is a failure, not a skip.
+bool gpu_device_present() {
+    static const bool present = [] {
+        auto g = pulp::render::GpuCompute::create();
+        return g && g->initialize_standalone();
+    }();
+    return present;
 }
 
 void prepare_proc(GpuNamProcessor& proc, pulp::state::StateStore& store, double sr,
@@ -365,6 +377,52 @@ TEST_CASE("GPU NAM CPU engine produces finite non-trivial amped output", "[nam]"
     REQUIRE(energy > 1e-4);   // the amp produced real output
 }
 
+TEST_CASE("GPU NAM CPU engine evaluates the NAM-compatible rational tanh", "[nam]") {
+    // The published CPU engine (the objects the audio thread runs) carries the
+    // rational mode after prepare and after a reload. The transfer curve is drawn
+    // in the same mode, so it equals a NamRational curve of the bundled model and
+    // differs from the Exact curve by the approximation's error.
+    GpuNamProcessor proc;
+    pulp::state::StateStore store;
+    prepare_proc(proc, store, 48000.0, GpuNamProcessor::kInternalBlock, /*engine=*/0.0f);
+    REQUIRE(GpuNamProcessor::kCpuTanhMode == nam::TanhMode::NamRational);
+    REQUIRE(proc.cpu_engine_tanh_mode() == nam::TanhMode::NamRational);
+    {
+        Driver d(proc, GpuNamProcessor::kInternalBlock, 48000.0);
+        proc.load_model("");   // rebuilds the CPU engine on the worker
+        d.pump(20, 5);
+    }
+    REQUIRE(proc.cpu_engine_tanh_mode() == nam::TanhMode::NamRational);
+
+    auto curve_for = [](nam::TanhMode mode) {
+        nam::NamRuntime m;
+        std::string err;
+        REQUIRE(nam::load_nam_runtime(GPU_NAM_DEFAULT_MODEL_PATH, m, &err));
+        m.set_tanh_mode(mode);
+        TransferCurve c{};
+        for (int p = 0; p < kCurvePoints; ++p) {
+            const float x = -kCurveRange + 2.0f * kCurveRange * p / (kCurvePoints - 1);
+            m.reset();
+            float y = 0.0f;
+            for (int i = 0; i < 1024; ++i) y = m.process_sample(x);
+            c[static_cast<std::size_t>(p)] = y;
+        }
+        return c;
+    };
+    const TransferCurve played = proc.transfer_curve_snapshot();
+    const TransferCurve rational = curve_for(nam::TanhMode::NamRational);
+    const TransferCurve exact = curve_for(nam::TanhMode::Exact);
+    float max_vs_rational = 0.0f, max_vs_exact = 0.0f;
+    for (std::size_t i = 0; i < played.size(); ++i) {
+        max_vs_rational = std::max(max_vs_rational, std::fabs(played[i] - rational[i]));
+        max_vs_exact = std::max(max_vs_exact, std::fabs(played[i] - exact[i]));
+    }
+    INFO("max |played - rational| = " << max_vs_rational << ", max |played - exact| = " << max_vs_exact);
+    REQUIRE(max_vs_rational == 0.0f);
+    REQUIRE(max_vs_exact > 1e-6f);
+    proc.release();
+}
+
 TEST_CASE("GPU NAM bypass passes the dry signal", "[nam]") {
     constexpr std::size_t BLOCK = GpuNamProcessor::kInternalBlock;
     constexpr double SR = 48000.0;
@@ -418,6 +476,7 @@ TEST_CASE("GPU NAM GPU engine reproduces the CPU engine", "[nam][gpu]") {
     REQUIRE(proc.gpu_engine_active());
 #endif
     if (!proc.gpu_engine_active()) {
+        REQUIRE_FALSE(gpu_device_present());
         WARN("GPU engine unavailable — skipping GPU-vs-CPU test (CPU path still covered).");
         proc.release();
         return;
@@ -535,6 +594,7 @@ TEST_CASE("GPU NAM GPU engine keeps stereo channels independent on the shared de
     REQUIRE(gpu_ready);
 #endif
     if (!gpu_ready) {
+        REQUIRE_FALSE(gpu_device_present());
         WARN("GPU engine unavailable — skipping stereo-independence test (CPU path covered).");
         return;
     }
@@ -586,6 +646,7 @@ TEST_CASE("GPU NAM switches Engine CPU->GPU->CPU live at fixed latency", "[nam][
 
     store.set_value(kEngine, 1.0f);
     if (!pump_until(d, 150, 8, [&] { return proc.gpu_engine_active(); })) {
+        REQUIRE_FALSE(gpu_device_present());
         WARN("GPU engine unavailable — skipping live-switch test.");
         proc.release();
         return;
@@ -1119,9 +1180,10 @@ TEST_CASE("GPU NAM cabinet swap is click-free", "[nam][ir]") {
     }
     proc.release();
 
-    // Baseline max |Δ| over a steady pre-swap window; assert the post-swap stream
-    // never exceeds a small multiple of it (a hard-reset click would spike far
-    // higher). Skip the initial warm-up.
+    // Steady max |Δ| before the swap (cabinet A) and after the crossfade settles
+    // (cabinet B, which is brighter and louder here). The transition window must
+    // stay within a small multiple of the larger of the two: a hard-reset click
+    // spikes far above both. Skip the initial warm-up.
     auto max_delta = [&](std::size_t lo, std::size_t hi) {
         double m = 0.0;
         for (std::size_t i = lo + 1; i < hi && i < out.size(); ++i)
@@ -1129,12 +1191,15 @@ TEST_CASE("GPU NAM cabinet swap is click-free", "[nam][ir]") {
         return m;
     };
     REQUIRE(swap_at > BLOCK * 4);
-    const double baseline = max_delta(BLOCK * 2, swap_at - BLOCK);
-    const double post = max_delta(swap_at, out.size());
+    const double steady_a = max_delta(BLOCK * 2, swap_at - BLOCK);
+    const double steady_b = max_delta(out.size() - BLOCK * 10, out.size());
+    const double transition = max_delta(swap_at, swap_at + BLOCK * 6);
     for (float v : out) REQUIRE(std::isfinite(v));
-    INFO("baseline maxΔ=" << baseline << " post-swap maxΔ=" << post);
-    REQUIRE(baseline > 0.0);
-    CHECK(post < 4.0 * baseline);   // no step discontinuity at the cabinet swap
+    INFO("steady A maxΔ=" << steady_a << " steady B maxΔ=" << steady_b
+         << " transition maxΔ=" << transition);
+    REQUIRE(steady_a > 0.0);
+    REQUIRE(steady_b > 0.0);
+    CHECK(transition < 1.25 * std::max(steady_a, steady_b));   // no step at the swap
 
     std::filesystem::remove(irA);
     std::filesystem::remove(irB);
@@ -1296,17 +1361,19 @@ TEST_CASE("GPU NAM applies a loaded cabinet IR", "[nam]") {
     write_ir_wav(id_path, {1.0f});                          // identity (stays [1] after norm)
     write_ir_wav(lp_path, {0.5f, 0.5f, 0.25f, 0.12f});      // short decaying kernel
 
+    // Each stream has its own latency already trimmed. Without an IR the CPU engine
+    // may run directly on host blocks (zero latency) while an IR forces the
+    // re-block path, so compare over the length all three share.
     const auto no_ir = run_stream_cpu_ir(SR, IB, sig, "");
     const auto ident = run_stream_cpu_ir(SR, IB, sig, id_path);
     const auto decay = run_stream_cpu_ir(SR, IB, sig, lp_path);
-    REQUIRE(no_ir.size() > IB * 2);
-    REQUIRE(ident.size() == no_ir.size());
-    REQUIRE(decay.size() == no_ir.size());
+    const std::size_t n = std::min({no_ir.size(), ident.size(), decay.size()});
+    REQUIRE(n > IB * 2);
 
     // A unit-impulse IR is transparent (0-latency overlap-save): the wet chain is
     // unchanged. Proves the convolver is wired correctly, not just "does something".
     double max_id = 0.0;
-    for (std::size_t i = IB; i < no_ir.size(); ++i)
+    for (std::size_t i = IB; i < n; ++i)
         max_id = std::max(max_id, std::abs(static_cast<double>(ident[i]) - no_ir[i]));
     INFO("identity-IR max_abs_diff=" << max_id);
     REQUIRE(max_id < 1e-3);
@@ -1314,7 +1381,7 @@ TEST_CASE("GPU NAM applies a loaded cabinet IR", "[nam]") {
     // A real (multi-tap) IR is actually convolved in: the output changes and
     // stays finite.
     double diff_e = 0.0, ref_e = 0.0;
-    for (std::size_t i = IB; i < no_ir.size(); ++i) {
+    for (std::size_t i = IB; i < n; ++i) {
         REQUIRE(std::isfinite(decay[i]));
         const double d = static_cast<double>(decay[i]) - no_ir[i];
         diff_e += d * d;
@@ -1327,9 +1394,9 @@ TEST_CASE("GPU NAM applies a loaded cabinet IR", "[nam]") {
     // applied, so the output matches the no-IR path. (Guards the worker/prepare
     // exception firewall around the decode.)
     const auto bad = run_stream_cpu_ir(SR, IB, sig, "/nonexistent/pulp/no_such_ir.wav");
-    REQUIRE(bad.size() == no_ir.size());
+    REQUIRE(bad.size() >= n);
     double max_bad = 0.0;
-    for (std::size_t i = IB; i < no_ir.size(); ++i)
+    for (std::size_t i = IB; i < n; ++i)
         max_bad = std::max(max_bad, std::abs(static_cast<double>(bad[i]) - no_ir[i]));
     INFO("bad-IR-path max_abs_diff=" << max_bad);
     REQUIRE(max_bad < 1e-3);
