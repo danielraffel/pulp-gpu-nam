@@ -754,9 +754,10 @@ public:
         // op per block (not per sample): negligible on the audio thread.
         audio_epoch_.fetch_add(1, std::memory_order_seq_cst);
 
-        // A host reset (offline render start, a new take) means "start fresh": the
-        // same input after a reset gives the same output as after prepare(),
-        // whatever was processed before. A host may keep processing silence while
+        // A host reset (offline render start, a new take) means "start fresh". On
+        // the CPU engine the same input after a reset gives the same output as
+        // after prepare(), whatever was processed before; the GPU engine resets
+        // only its CPU-side state (see reset_stream_state()). A host may keep processing silence while
         // stopped and reset rather than reactivate; without this the silence would
         // leave the gate closed at the start of the render. A transport jump alone
         // does not reset: with live input the stream never stopped.
@@ -1142,9 +1143,9 @@ private:
         }
     }
 
-    // Audio thread, on a host reset: return every piece of stream state to what
-    // prepare() left, so the next block renders exactly as the first block after
-    // prepare(). Allocation-free: the CPU models are copy-assigned from the
+    // Audio thread, on a host reset. On the CPU engine, return every piece of
+    // stream state to what prepare() left, so the next block renders exactly as
+    // the first block after prepare(). Allocation-free: the CPU models are copy-assigned from the
     // prewarmed snapshot into buffers of identical size, and everything else is a
     // fill or a scalar store. The cost is one copy of the model's weights and
     // history (a few hundred KB for a standard WaveNet).
