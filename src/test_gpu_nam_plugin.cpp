@@ -973,13 +973,15 @@ struct ResetRender {
     long reset_block_allocs = 0;
 };
 ResetRender render_reset_case(double sr, const std::vector<float>& pre, int pre_blocks, bool reset,
-                              const std::vector<float>& x, int x_blocks, int jump_at = -1) {
+                              const std::vector<float>& x, int x_blocks, int jump_at = -1,
+                              const std::string& model_path = {}) {
     constexpr std::size_t BLOCK = GpuNamProcessor::kInternalBlock;
     GpuNamProcessor proc;
     pulp::state::StateStore store;
     proc.set_state_store(&store);
     proc.define_parameters(store);
     store.set_value(kEngine, 0.0f);
+    if (!model_path.empty()) proc.load_model(model_path);
     pulp::format::PrepareContext ctx;
     ctx.sample_rate = sr;
     ctx.max_buffer_size = static_cast<int>(BLOCK);
@@ -1998,3 +2000,27 @@ TEST_CASE("GPU NAM stamped engine requests preserve active history until reprepa
     }
 }
 #endif
+
+// The host reset copies the prewarmed CPU models back; every architecture's
+// state must copy without allocating and restore the model exactly.
+TEST_CASE("GPU NAM host reset is exact and allocation-free for LSTM and A2 models", "[nam][reset]") {
+    constexpr std::size_t BLOCK = GpuNamProcessor::kInternalBlock;
+    const auto loud = sine(BLOCK, 0.013f, 0.7f);
+    const auto x = sine(BLOCK, 0.041f, 0.3f);
+    const auto a2 = (std::filesystem::temp_directory_path() / "gpu_nam_reset_a2.nam").string();
+    std::ofstream(a2, std::ios::binary) << slim_container_nam(2.0f, 3.0f);
+    const std::string lstm = std::string(GPU_NAM_MODELS_DIR) + "/lstm.nam";
+    for (const std::string& model : {lstm, a2}) {
+        INFO("model " << model);
+        const auto fresh = render_reset_case(48000.0, loud, 0, false, x, 12, -1, model);
+        const auto stale = render_reset_case(48000.0, loud, 40, false, x, 12, -1, model);
+        const auto reset = render_reset_case(48000.0, loud, 40, true, x, 12, -1, model);
+        REQUIRE(energy_from(fresh.out, fresh.latency, BLOCK) > 1e-6);
+        // Control: without the reset the earlier audio changes the output.
+        REQUIRE(max_abs_diff(stale.out, fresh.out) > 1e-6);
+        INFO("max |reset - fresh| = " << max_abs_diff(reset.out, fresh.out));
+        REQUIRE(reset.out == fresh.out);
+        REQUIRE(reset.reset_block_allocs == 0);
+    }
+    std::filesystem::remove(a2);
+}

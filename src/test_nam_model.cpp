@@ -628,6 +628,8 @@ TEST_CASE("crafted WaveNet shapes are rejected before any large allocation", "[n
         {"huge-channels", "3", "100000000", "1", 3},
         {"fraction", "2.5", "1", "1", 3},
         {"negative", "-3", "1", "1", 3},
+        {"zero-channels", "3", "0", "1", 3},
+        {"zero-dilation", "3", "1", "0", 3},
         // Every field in range; the weights alone would be 2^39 floats.
         {"wide-history", "4096", "4096", "1,1,1,1,1,1,1,1", 3},
     };
