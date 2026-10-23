@@ -78,3 +78,36 @@ were then compared sample by sample with alignment.
 
 The GPU engine evaluates exact tanh. It matches the CPU engine's `Exact` mode
 to -112 dB or better on the bundled and test captures.
+
+## Unreleased: lite WaveNet and LSTM speedups
+
+Two changes since 1.3.0 make the CPU engine faster without changing its output.
+Every sample is byte-identical to 1.3.0's, in the default and exact tanh modes and at block sizes
+37, 64, 128 and 512 on all eight test captures, so the parity results above
+still hold unchanged.
+
+- **WaveNet widths above four are padded to a multiple of four.** Every product
+  of the lite preset's 6-channel array now runs the four-lane kernels. Widths of
+  four or less (nano, feather) keep their exact-width kernels.
+- **LSTM layers run over a block of frames at a time.** The input half of the gate
+  product is batched across the block, so only the recurrent half runs per
+  sample. That half keeps all of a cell's gate rows in registers at once, and the
+  default tanh mode evaluates the gates and the cell update in one pass.
+
+Paired, interleaved runs on an M1 Max, at background QoS on a loaded shared host.
+Times are median us per block. The ratios are reliable, but the absolute times are
+not P-core figures. Single cells move by up to about 5% between runs.
+
+| Capture | Block | 1.3.0 | This change | Speedup | Reference, fast tanh | vs reference |
+|---|---|---|---|---|---|---|
+| Lite WaveNet | 64 | 83.6 | 66.4 | 1.26x | 127.2 | 1.91x |
+| Lite WaveNet | 128 | 168.1 | 131.9 | 1.27x | 233.8 | 1.77x |
+| Lite WaveNet | 512 | 740.1 | 532.0 | 1.39x | 1155.5 | 2.12x |
+| 3x24 LSTM | 64 | 118.3 | 103.8 | 1.14x | 159.0 | 1.53x |
+| 3x24 LSTM | 128 | 240.6 | 210.4 | 1.15x | 320.2 | 1.52x |
+| 3x24 LSTM | 512 | 1384.3 | 1179.8 | 1.21x | 2009.5 | 1.77x |
+| 1x3 LSTM | 64 | 9.2 | 7.9 | 1.16x | 15.2 | 1.92x |
+| 1x3 LSTM | 512 | 73.6 | 63.0 | 1.16x | 121.3 | 1.92x |
+
+Standard, feather and nano captures run the same code as before and measure
+within noise of 1.3.0.

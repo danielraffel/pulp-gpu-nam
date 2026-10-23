@@ -41,6 +41,7 @@
 // The model output is the linear head over the last layer's h'. NAM's LSTM has no
 // separate input/output gain here — the head scale is folded into the head weights.
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -95,6 +96,7 @@ public:
         // Transposed copy for the vectorized step: wt_[col*rows + row].
         for (std::size_t r = 0; r < rows; ++r)
             for (std::size_t c = 0; c < cols; ++c) wt_[c * rows + r] = w_[r * cols + c];
+        input_kernel_ = kernels::pick_kernel(kernels::Epi::Store, static_cast<int>(rows), in_);
         reset();
     }
 
@@ -117,8 +119,65 @@ public:
         std::fill(z, z + rows, 0.0f);
         kernels::matvec_acc(wt_.data(), xh_.data(), z, rows, cols);
         for (int r = 0; r < rows; ++r) z[r] += b_[static_cast<std::size_t>(r)];
-        // Gate blocks i, f, g, o. Exact is libm per element, so one fused pass
-        // (no vector work to batch); the other modes run array-wide passes.
+        apply_gates(z, out, mode);
+    }
+
+    // The input half of the product for a run of n frames, which does not depend
+    // on the recurrence: zx[t*4h + r] = sum_j W[r][j] * x[t*in + j]. Batched over
+    // frames, so each weight column is loaded once per frame group.
+    void input_run(const float* x, float* zx, int n) const {
+        const int rows = 4 * h_;
+        input_kernel_(wt_.data(), x, zx, n, rows, in_, kernels::EpiArgs{});
+    }
+
+    // One step from a precomputed input half (input_run): continue the same
+    // per-row sum over the recurrent columns in place in `zx`, add the bias,
+    // apply the gates. Every term is added in the order step_fast() adds it, so
+    // the two agree bit for bit and share state. `zx` is consumed as scratch.
+    void step_from_input(float* zx, float* out, TanhMode mode) {
+        const int H = h_;
+        const int rows = 4 * H;
+        kernels::matvec_acc(wt_.data() + static_cast<std::ptrdiff_t>(in_) * rows, xh_.data() + in_, zx, rows, H);
+        if (mode == TanhMode::NamRational && H >= kFusedGatesMinHidden) {
+            gates_rational(zx, out);
+            return;
+        }
+        for (int r = 0; r < rows; ++r) zx[r] += b_[static_cast<std::size_t>(r)];
+        apply_gates(zx, out, mode);
+    }
+
+private:
+    // Below this width the array-wide gate passes are faster than the fused pass
+    // (M1 Max A/B).
+    static constexpr int kFusedGatesMinHidden = 8;
+
+    // The NamRational gates in one pass over the hidden units, with the bias add
+    // folded in: the same per-element operations, in the same order, as the
+    // bias loop followed by apply_gates() in NamRational mode.
+    void gates_rational(const float* __restrict z, float* __restrict out) {
+        const int H = h_;
+        const float* __restrict b = b_.data();
+        float* __restrict c = c_state_.data();
+        float* __restrict hx = xh_.data() + in_;
+        for (int j = 0; j < H; ++j) {
+            const float ig = kernels::nam_rational_sigmoid(z[j] + b[j]);
+            const float fg = kernels::nam_rational_sigmoid(z[H + j] + b[H + j]);
+            const float gg = kernels::nam_rational_tanh(z[2 * H + j] + b[2 * H + j]);
+            const float og = kernels::nam_rational_sigmoid(z[3 * H + j] + b[3 * H + j]);
+            const float cn = fg * c[j] + ig * gg;
+            c[j] = cn;
+            const float hn = og * kernels::nam_rational_tanh(cn);
+            hx[j] = hn;
+            out[j] = hn;
+        }
+    }
+
+    // Gate blocks i, f, g, o -> new (c, h); h is written to the recurrent half of
+    // xh_ and to out.
+    void apply_gates(float* z, float* out, TanhMode mode) {
+        const int H = h_;
+        // Exact is libm per element, so one fused pass (no vector work to batch);
+        // the other modes run array-wide passes.
         if (mode == TanhMode::Exact || (mode == TanhMode::Vector && H < kVectorMinHidden)) {
             float* c = c_state_.data();
             float* hx = xh_.data() + in_;
@@ -152,6 +211,7 @@ public:
         }
     }
 
+public:
     // Reference step (the oracle): per-row dot products and scalar std::tanh/exp.
     // x: in_ values -> writes h_ output values (the new hidden state) to out.
     void step(const float* x, float* out) {
@@ -198,6 +258,7 @@ private:
     std::vector<float> h_state_, c_state_;
     std::vector<float> xh_, z_;   // scratch; xh_'s tail is the live hidden state for step_fast
     std::vector<float> wt_;       // W transposed [(in+h) x 4h] for step_fast
+    kernels::KernelFn input_kernel_ = nullptr;   // input_run's product
     std::vector<float> c_tanh_;   // scratch
 };
 
@@ -270,6 +331,10 @@ public:
 
         hbuf_a_.assign(static_cast<std::size_t>(hidden_size_), 0.0f);
         hbuf_b_.assign(static_cast<std::size_t>(hidden_size_), 0.0f);
+        const std::size_t run = static_cast<std::size_t>(kRun);
+        zx_run_.assign(run * 4u * static_cast<std::size_t>(hidden_size_), 0.0f);
+        h_run_[0].assign(run * static_cast<std::size_t>(hidden_size_), 0.0f);
+        h_run_[1].assign(run * static_cast<std::size_t>(hidden_size_), 0.0f);
         return weights_consumed_ == weights_.size();
     }
 
@@ -319,8 +384,24 @@ public:
         return y;
     }
 
+    // The Fast engine runs layer-major over runs of up to kRun frames: each
+    // layer's input half for the whole run is one batched product (input_run),
+    // and only the recurrent half stays per sample. Bit-identical to calling
+    // process_sample() per sample. Allocation-free for any n.
+    static constexpr int kRun = 128;
+
     void process(const float* in, float* out, std::uint32_t n) {
-        for (std::uint32_t i = 0; i < n; ++i) out[i] = process_sample(in[i]);
+        if (engine_ != CpuEngine::Fast) {
+            for (std::uint32_t i = 0; i < n; ++i) out[i] = process_sample(in[i]);
+            return;
+        }
+        while (n > 0) {
+            const int m = static_cast<int>(std::min<std::uint32_t>(n, static_cast<std::uint32_t>(kRun)));
+            run(in, out, m);
+            in += m;
+            out += m;
+            n -= static_cast<std::uint32_t>(m);
+        }
     }
 
     int input_size() const { return input_size_; }
@@ -334,8 +415,31 @@ public:
     const std::string& error() const { return error_; }
 
 private:
+    void run(const float* x, float* y, int m) {
+        const int H = hidden_size_;
+        const std::size_t R = 4u * static_cast<std::size_t>(H);
+        const float* layer_in = x;
+        int cur = 0;
+        for (LstmCell& cell : cells_) {
+            cell.input_run(layer_in, zx_run_.data(), m);
+            float* h = h_run_[cur].data();
+            for (int t = 0; t < m; ++t)
+                cell.step_from_input(zx_run_.data() + static_cast<std::size_t>(t) * R,
+                                     h + static_cast<std::size_t>(t) * H, tanh_mode_);
+            layer_in = h;
+            cur ^= 1;
+        }
+        for (int t = 0; t < m; ++t) {
+            const float* hl = layer_in + static_cast<std::size_t>(t) * H;
+            float v = head_b_.empty() ? 0.0f : head_b_[0];
+            for (int j = 0; j < H; ++j) v += head_w_[static_cast<std::size_t>(j)] * hl[j];
+            y[t] = v;
+        }
+    }
+
     int input_size_ = 1, hidden_size_ = 1, num_layers_ = 1, out_size_ = 1;
     CpuEngine engine_ = CpuEngine::Fast;
+    std::vector<float> zx_run_, h_run_[2];   // run scratch for the Fast engine
     TanhMode tanh_mode_ = TanhMode::Exact;
     std::vector<LstmCell> cells_;
     std::vector<float> head_w_, head_b_;
