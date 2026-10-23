@@ -19,6 +19,9 @@
 #include "gpu_nam_processor.hpp"
 
 #include <algorithm>
+#include <atomic>
+#include <cstdlib>
+#include <new>
 #include <chrono>
 #include <cmath>
 #include <fstream>
@@ -26,6 +29,21 @@
 #include <vector>
 
 using namespace pulp::examples;
+
+// Allocation probe for the reset tests: counts operator new on the arming thread
+// only, so the processor's worker thread cannot trip it.
+namespace {
+thread_local bool g_plugin_count_allocs = false;
+std::atomic<long> g_plugin_allocs{0};
+}  // namespace
+void* operator new(std::size_t n) {
+    if (g_plugin_count_allocs)
+        g_plugin_allocs.fetch_add(1, std::memory_order_relaxed);
+    if (void* p = std::malloc(n ? n : 1)) return p;
+    throw std::bad_alloc();
+}
+void operator delete(void* p) noexcept { std::free(p); }
+void operator delete(void* p, std::size_t) noexcept { std::free(p); }
 
 namespace {
 
@@ -108,13 +126,18 @@ struct Driver {
         pctx.sample_rate = sr;
         pctx.num_samples = static_cast<int>(b);
     }
-    std::vector<float> block_io(const std::vector<float>& in, int sleep_ms) {
+    // Runs one block in place: out_l/out_r hold the result. Allocation-free, so
+    // a test can count the processor's own allocations around it.
+    void process_block(const std::vector<float>& in) {
         for (std::size_t i = 0; i < block; ++i) in_l[i] = in_r[i] = i < in.size() ? in[i] : 0.0f;
         const float* ip[2] = {in_l.data(), in_r.data()};
         float* op[2] = {out_l.data(), out_r.data()};
         pulp::audio::BufferView<const float> iv(ip, 2, block);
         pulp::audio::BufferView<float> ov(op, 2, block);
         proc.process(ov, iv, mi, mo, pctx);
+    }
+    std::vector<float> block_io(const std::vector<float>& in, int sleep_ms) {
+        process_block(in);
         if (sleep_ms > 0) std::this_thread::sleep_for(std::chrono::milliseconds(sleep_ms));
         return {out_l.begin(), out_l.end()};
     }
@@ -936,6 +959,128 @@ TEST_CASE("GPU NAM noise gate attenuates a sub-threshold signal", "[nam]") {
     INFO("open=" << e_open << " gated=" << e_gated);
     REQUIRE(e_open > 1e-8);               // the ungated amp produced real output
     REQUIRE(e_gated < e_open * 0.05);     // the gate cut the sub-threshold signal hard
+}
+
+namespace {
+
+// One render of a CPU-engine processor with default gate/tone/output settings:
+// `pre_blocks` of `pre` input, then `x_blocks` of `x`. The first block of `x`
+// carries `reset_requested`; block `jump_at` of `x` carries `transport_jump`.
+// Returns channel 0 of the `x` section and the reported latency.
+struct ResetRender {
+    std::vector<float> out;
+    std::size_t latency = 0;
+    long reset_block_allocs = 0;
+};
+ResetRender render_reset_case(double sr, const std::vector<float>& pre, int pre_blocks, bool reset,
+                              const std::vector<float>& x, int x_blocks, int jump_at = -1) {
+    constexpr std::size_t BLOCK = GpuNamProcessor::kInternalBlock;
+    GpuNamProcessor proc;
+    pulp::state::StateStore store;
+    proc.set_state_store(&store);
+    proc.define_parameters(store);
+    store.set_value(kEngine, 0.0f);
+    pulp::format::PrepareContext ctx;
+    ctx.sample_rate = sr;
+    ctx.max_buffer_size = static_cast<int>(BLOCK);
+    ctx.input_channels = 2;
+    ctx.output_channels = 2;
+    proc.prepare(ctx);
+    Driver d(proc, BLOCK, sr);
+    for (int b = 0; b < pre_blocks; ++b) d.block_io(pre, 0);
+    ResetRender r;
+    r.latency = static_cast<std::size_t>(proc.latency_samples());
+    for (int b = 0; b < x_blocks; ++b) {
+        d.pctx.reset_requested = reset && b == 0;
+        d.pctx.transport_jump = b == jump_at;
+        if (b == 0) {
+            g_plugin_allocs = 0;
+            g_plugin_count_allocs = true;
+            d.process_block(x);
+            g_plugin_count_allocs = false;
+            r.reset_block_allocs = g_plugin_allocs.load();
+        } else {
+            d.process_block(x);
+        }
+        r.out.insert(r.out.end(), d.out_l.begin(), d.out_l.end());
+    }
+    d.pctx.reset_requested = d.pctx.transport_jump = false;
+    proc.release();
+    return r;
+}
+
+double energy_from(const std::vector<float>& v, std::size_t from, std::size_t n) {
+    double e = 0.0;
+    for (std::size_t i = from; i < from + n && i < v.size(); ++i) e += static_cast<double>(v[i]) * v[i];
+    return e;
+}
+
+double max_abs_diff(const std::vector<float>& a, const std::vector<float>& b) {
+    double m = 0.0;
+    for (std::size_t i = 0; i < a.size() && i < b.size(); ++i)
+        m = std::max(m, std::abs(static_cast<double>(a[i]) - b[i]));
+    return m;
+}
+
+}  // namespace
+
+// A host that keeps processing silence while stopped and then resets (rather than
+// reactivates) at the start of a render must get the same output as a freshly
+// prepared processor, with the default gate on.
+TEST_CASE("GPU NAM host reset restarts the gate from open after silence", "[nam][gate][reset]") {
+    constexpr std::size_t BLOCK = GpuNamProcessor::kInternalBlock;
+    const std::vector<float> silence;
+    const auto tone = sine(BLOCK, 0.06f, 0.25f);   // -12 dBFS, far above the -80 dB gate
+    const auto fresh = render_reset_case(48000.0, silence, 0, false, tone, 8);
+    const auto stale = render_reset_case(48000.0, silence, 100, false, tone, 8);
+    const auto reset = render_reset_case(48000.0, silence, 100, true, tone, 8);
+    const std::size_t lat = fresh.latency;
+    REQUIRE(fresh.out.size() > lat + BLOCK);
+    INFO("latency " << lat << ", first wet block energy fresh=" << energy_from(fresh.out, lat, BLOCK)
+                    << " stale=" << energy_from(stale.out, lat, BLOCK));
+    REQUIRE(energy_from(fresh.out, lat, BLOCK) > 1e-4);
+    // Control: without the reset the silence closed the gate.
+    REQUIRE(energy_from(stale.out, lat, BLOCK) < energy_from(fresh.out, lat, BLOCK) * 0.01);
+    INFO("max |reset - fresh| = " << max_abs_diff(reset.out, fresh.out));
+    REQUIRE(reset.out == fresh.out);
+    REQUIRE(reset.reset_block_allocs == 0);
+}
+
+// A host reset means "start fresh": after real audio, a reset followed by X must
+// give exactly what a fresh prepare followed by X gives, model history included.
+TEST_CASE("GPU NAM host reset after audio bit-matches a fresh prepare", "[nam][reset]") {
+    constexpr std::size_t BLOCK = GpuNamProcessor::kInternalBlock;
+    const auto loud = sine(BLOCK, 0.013f, 0.7f);
+    const auto x = sine(BLOCK, 0.041f, 0.3f);
+    // Control: the allocation probe sees an allocation on this thread.
+    g_plugin_allocs = 0;
+    g_plugin_count_allocs = true;
+    { std::vector<float> probe(16); (void)probe; }
+    g_plugin_count_allocs = false;
+    REQUIRE(g_plugin_allocs.load() == 1);
+    for (double sr : {48000.0, 44100.0}) {   // matched rate, and resampling around the model
+        INFO("host rate " << sr);
+        const auto fresh = render_reset_case(sr, loud, 0, false, x, 12);
+        const auto stale = render_reset_case(sr, loud, 40, false, x, 12);
+        const auto reset = render_reset_case(sr, loud, 40, true, x, 12);
+        // Control: without the reset the earlier audio changes the output.
+        REQUIRE(max_abs_diff(stale.out, fresh.out) > 1e-4);
+        INFO("max |reset - fresh| = " << max_abs_diff(reset.out, fresh.out));
+        REQUIRE(reset.out == fresh.out);
+        REQUIRE(reset.reset_block_allocs == 0);
+    }
+}
+
+// A transport jump with continuous input (live monitoring) is not a reset: the
+// output must stay identical to an uninterrupted render, with no step.
+TEST_CASE("GPU NAM transport jump leaves the stream continuous", "[nam][reset]") {
+    constexpr std::size_t BLOCK = GpuNamProcessor::kInternalBlock;
+    const auto x = sine(BLOCK, 0.041f, 0.3f);
+    const std::vector<float> none;
+    const auto plain = render_reset_case(48000.0, none, 0, false, x, 24);
+    const auto jumped = render_reset_case(48000.0, none, 0, false, x, 24, 12);
+    INFO("max |jumped - plain| = " << max_abs_diff(jumped.out, plain.out));
+    REQUIRE(jumped.out == plain.out);
 }
 
 TEST_CASE("GPU NAM EQ is transparent when flat and shapes tone when boosted", "[nam]") {
