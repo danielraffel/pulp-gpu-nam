@@ -92,3 +92,27 @@ output for any block partitioning, allocation-free streaming, and the
 NAM-compatible rational tanh against an independent implementation.
 
 Use a bounded job count (`-j8` here) rather than every core on a shared machine.
+
+### CPU engine CI and output identity
+
+`tools/cpu-engine` builds the CPU inference engine on its own, with no Pulp SDK
+and no GPU. CI (`.github/workflows/cpu-engine.yml`) runs it on Linux:
+
+```bash
+cmake -S tools/cpu-engine -B build-cpu -DCMAKE_BUILD_TYPE=Release
+cmake --build build-cpu -j4
+ctest --test-dir build-cpu --output-on-failure
+python3 tools/cpu-engine/render_hashes.py --render build-cpu/gpu-nam-golden-render
+```
+
+The last step renders 8 captures in the default and exact tanh modes at block
+sizes 37, 64, 128 and 512. It then checks that every output file has the
+SHA-256 stored in `tools/cpu-engine/render-hashes.json`. A performance change
+must keep the output byte-identical. If a change is meant to alter the output,
+re-record the hashes with `--update` and say why in the PR.
+
+Hashes are stored per platform, and each platform is compared only with itself.
+`linux-x86_64` (CI, GCC) and `darwin-arm64` (Apple clang) share no hashes. arm64
+fuses multiply-adds that x86-64 without FMA rounds separately, and the exact
+mode calls each platform's libm. Running the check on a Mac uses the
+`darwin-arm64` hashes.
