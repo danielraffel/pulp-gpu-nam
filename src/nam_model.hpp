@@ -54,6 +54,7 @@
 
 #include <choc/text/choc_JSON.h>
 
+#include "nam_limits.hpp"
 #include "nam_wavenet_block.hpp"
 #include "nam_wavenet_config.hpp"
 
@@ -340,6 +341,7 @@ public:
                          + " input_size must equal the previous array's channel count";
                 return false;
             }
+        if (!check_shape_bounds()) return false;
 
         arrays_.clear();
         arrays_.resize(arrays_cfg_.size());
@@ -512,6 +514,69 @@ public:
     const std::string& error() const { return error_; }
 
 private:
+    // Reject a shape before anything sized by it is allocated: per-layer ranges,
+    // the receptive field, and the weight count (computed from the config, the
+    // same arithmetic as LayerArray::weight_count()) against the file's weights,
+    // plus the floats the weights and every layer history would take.
+    bool check_shape_bounds() {
+        long rf = 0;
+        std::size_t expected = 1;   // trailing head_scale
+        std::size_t history = 0;
+        for (std::size_t i = 0; i < arrays_cfg_.size(); ++i) {
+            const LayerArrayConfig& a = arrays_cfg_[i];
+            const std::string where = "layer array " + std::to_string(i) + ": ";
+            if (a.channels < 1 || a.channels > kMaxChannels || a.head_size < 1 || a.head_size > kMaxChannels
+                || a.input_size < 1 || a.input_size > kMaxChannels || a.condition_size != 1) {
+                error_ = where + "channel, head or input size out of range (1.." + std::to_string(kMaxChannels) + ")";
+                return false;
+            }
+            if (a.kernel_size < 1 || a.kernel_size > kMaxKernelSize) {
+                error_ = where + "kernel_size out of range (1.." + std::to_string(kMaxKernelSize) + ")";
+                return false;
+            }
+            if (a.dilations.empty()) {
+                error_ = where + "no dilations";
+                return false;
+            }
+            const std::size_t C = static_cast<std::size_t>(a.channels);
+            const std::size_t Z = a.gated ? 2 * C : C;
+            const std::size_t K = static_cast<std::size_t>(a.kernel_size);
+            const std::size_t H = static_cast<std::size_t>(a.head_size);
+            expected += C * static_cast<std::size_t>(a.input_size);
+            for (int d : a.dilations) {
+                if (d < 1 || d > (1 << 16)) {
+                    error_ = where + "dilation out of range (1.." + std::to_string(1 << 16) + ")";
+                    return false;
+                }
+                const long reach = static_cast<long>(a.kernel_size - 1) * d;
+                rf += reach;
+                if (rf > kMaxReceptiveField) {
+                    error_ = "receptive field exceeds " + std::to_string(kMaxReceptiveField) + " samples";
+                    return false;
+                }
+                expected += Z * C * K + Z + Z + C * C + C;
+                // The oracle ring and the block engine's linear buffer (reach plus
+                // a run span, channels padded to four) both hold this layer's input.
+                history += (static_cast<std::size_t>(reach) + 1u) * C
+                           + (2u * static_cast<std::size_t>(reach) + 1024u) * ((C + 3u) & ~std::size_t{3});
+            }
+            expected += H * C + (a.head_bias ? H : 0u);
+        }
+        expected_weight_count_ = expected;
+        if (expected + history > kMaxModelFloats) {
+            error_ = "model would allocate more than " + std::to_string(kMaxModelFloats) + " floats";
+            return false;
+        }
+        if (weights_.size() != expected) {
+            std::ostringstream ss;
+            ss << "weight count mismatch: file provides " << weights_.size()
+               << " floats, model layout consumes " << expected;
+            error_ = ss.str();
+            return false;
+        }
+        return true;
+    }
+
     bool use_block() const { return block_ok_ && engine_ == CpuEngine::Block; }
 
     void run_silence(std::uint64_t n) {
@@ -662,11 +727,18 @@ inline bool load_nam(const std::string& path, NamModel& out, std::string* error 
             || (L.hasObjectMember("activation") && L["activation"].isArray()))
             return fail("A2-shaped WaveNet capture; rebuild with GPU_NAM_WITH_A2 enabled");
         LayerArrayConfig a;
-        a.input_size = static_cast<int>(detail::num(L["input_size"]));
-        a.condition_size = static_cast<int>(detail::num(L["condition_size"]));
-        a.channels = static_cast<int>(detail::num(L["channels"]));
-        a.kernel_size = static_cast<int>(detail::num(L["kernel_size"]));
-        a.head_size = static_cast<int>(detail::num(L["head_size"]));
+        // Integers are range-checked before the cast, so a huge, negative or
+        // fractional value is a load error rather than undefined behavior.
+        bool ints_ok = true;
+        a.input_size = static_cast<int>(detail::parse_int(L["input_size"], 1, kMaxChannels, ints_ok));
+        a.condition_size = static_cast<int>(detail::parse_int(L["condition_size"], 1, kMaxChannels, ints_ok));
+        a.channels = static_cast<int>(detail::parse_int(L["channels"], 1, kMaxChannels, ints_ok));
+        a.kernel_size = static_cast<int>(detail::parse_int(L["kernel_size"], 1, kMaxKernelSize, ints_ok));
+        a.head_size = static_cast<int>(detail::parse_int(L["head_size"], 1, kMaxChannels, ints_ok));
+        if (!ints_ok)
+            return fail("layer " + std::to_string(i) + ": input_size, condition_size, channels, head_size (1.."
+                        + std::to_string(kMaxChannels) + ") or kernel_size (1.." + std::to_string(kMaxKernelSize)
+                        + ") is missing or out of range");
         a.head_bias = L.hasObjectMember("head_bias") && L["head_bias"].getWithDefault<bool>(false);
         a.gated = L.hasObjectMember("gated") && L["gated"].getWithDefault<bool>(false);
         if (L.hasObjectMember("activation") && L["activation"].isString())
@@ -701,10 +773,11 @@ inline bool load_nam(const std::string& path, NamModel& out, std::string* error 
         if (!dil.isArray() || dil.size() == 0)
             return fail("layer " + std::to_string(i) + ": 'dilations' must be a non-empty array");
         for (uint32_t d = 0; d < dil.size(); ++d) {
-            const int dv = static_cast<int>(detail::num(dil[d]));
             // Keep the receptive field (and hence prewarm cost) bounded and int-safe.
             // Real captures top out around 512; the cap is far above that.
-            if (dv <= 0 || dv > (1 << 16))
+            bool dok = true;
+            const int dv = static_cast<int>(detail::parse_int(dil[d], 1, 1 << 16, dok));
+            if (!dok)
                 return fail("layer " + std::to_string(i) + ": dilation out of range (1.." + std::to_string(1 << 16) + ")");
             a.dilations.push_back(dv);
         }

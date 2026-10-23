@@ -17,6 +17,7 @@
 //                   batchnorm(mean, var, weight, bias, eps)   [only if batchnorm]
 //   head([channels->out_channels][k=1] + bias)
 
+#include "nam_limits.hpp"
 #include "nam_model.hpp"   // Conv, Activation, parse_activation, apply_activation
 
 #include <cmath>
@@ -112,8 +113,24 @@ public:
         auto fail = [&](const std::string& m) { if (error) *error = m; return false; };
         if (in_channels != 1) return fail("ConvNet: only in_channels == 1 is supported");
         if (out_channels != 1) return fail("ConvNet: only out_channels == 1 is supported");
-        if (channels <= 0) return fail("ConvNet: channels must be positive");
+        if (channels <= 0 || channels > kMaxChannels) return fail("ConvNet: channels out of range");
         if (dilations.empty()) return fail("ConvNet: 'dilations' must be non-empty");
+
+        // Bound the receptive field and the per-block history before anything
+        // sized by them is allocated (kernel 2: each block reaches back `d`).
+        {
+            long rf = 0;
+            std::size_t history = 0;
+            for (int d : dilations) {
+                if (d < 1 || d > (1 << 16)) return fail("ConvNet: dilation out of range");
+                rf += d;
+                if (rf > kMaxReceptiveField)
+                    return fail("ConvNet: receptive field exceeds " + std::to_string(kMaxReceptiveField) + " samples");
+                history += (static_cast<std::size_t>(d) + 1u) * static_cast<std::size_t>(channels);
+            }
+            if (history > kMaxModelFloats)
+                return fail("ConvNet: model would allocate more than " + std::to_string(kMaxModelFloats) + " floats");
+        }
 
         channels_ = channels;
         out_channels_ = out_channels;
