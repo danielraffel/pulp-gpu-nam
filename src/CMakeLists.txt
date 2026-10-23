@@ -555,6 +555,21 @@ if(TARGET pulp::render AND TARGET pulp::gpu-audio)
     endif()
 endif()
 
+# Headless CLAP host check: a reset after silence matches a fresh activation.
+if(APPLE AND TARGET GpuNam_CLAP)
+    set(_gpu_nam_reset_clap_include "${PULP_CLAP_INCLUDE_DIR}")
+    if(NOT EXISTS "${_gpu_nam_reset_clap_include}/clap/clap.h" AND DEFINED CLAP_SOURCE_DIR)
+        set(_gpu_nam_reset_clap_include "${CLAP_SOURCE_DIR}/include")
+    endif()
+    add_executable(gpu-nam-clap-reset-test test_gpu_nam_clap_reset.cpp)
+    target_include_directories(gpu-nam-clap-reset-test PRIVATE "${_gpu_nam_reset_clap_include}")
+    target_link_libraries(gpu-nam-clap-reset-test PRIVATE ${CMAKE_DL_LIBS})
+    add_dependencies(gpu-nam-clap-reset-test GpuNam_CLAP)
+    add_test(NAME gpu-nam-clap-reset-after-silence
+        COMMAND gpu-nam-clap-reset-test $<TARGET_FILE:GpuNam_CLAP>)
+    set_tests_properties(gpu-nam-clap-reset-after-silence PROPERTIES TIMEOUT 60)
+endif()
+
 # This opt-in binary is acceptance instrumentation, not a distributable plugin.
 if(GPU_NAM_NATIVE_HOST_PROBE)
     if(NOT APPLE OR NOT TARGET GpuNam_CLAP OR

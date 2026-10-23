@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -14,6 +15,8 @@
 #include <utility>
 #include <vector>
 
+#include "nam_a2.hpp"
+#include "nam_convnet.hpp"
 #include "nam_model.hpp"
 
 // Allocation probe: counts operator new while armed, so a test can prove the
@@ -21,9 +24,14 @@
 namespace {
 std::atomic<bool> g_count_allocs{false};
 std::atomic<long> g_allocs{0};
+std::atomic<std::size_t> g_max_alloc{0};
 }  // namespace
 void* operator new(std::size_t n) {
-    if (g_count_allocs.load(std::memory_order_relaxed)) g_allocs.fetch_add(1, std::memory_order_relaxed);
+    if (g_count_allocs.load(std::memory_order_relaxed)) {
+        g_allocs.fetch_add(1, std::memory_order_relaxed);
+        std::size_t prev = g_max_alloc.load(std::memory_order_relaxed);
+        while (n > prev && !g_max_alloc.compare_exchange_weak(prev, n, std::memory_order_relaxed)) {}
+    }
     if (void* p = std::malloc(n ? n : 1)) return p;
     throw std::bad_alloc();
 }
@@ -568,5 +576,104 @@ TEST_CASE("matvec_acc tiles give the bits of a plain per-row sum", "[nam][kernel
         }
         kernels::matvec_acc(wt.data(), v.data(), z.data(), R, C);
         REQUIRE(z == want);
+    }
+}
+
+namespace {
+// Writes a .nam with one A1 layer array of the given shape and `weights` floats.
+std::string write_a1(const std::string& name, const std::string& kernel, const std::string& channels,
+                     const std::string& dilation, int weights) {
+    const std::string path = "/tmp/pulp_nam_bounds_" + name + ".nam";
+    std::ofstream f(path, std::ios::binary);
+    f << "{\"architecture\":\"WaveNet\",\"config\":{\"layers\":[{\"input_size\":1,\"condition_size\":1,"
+      << "\"channels\":" << channels << ",\"kernel_size\":" << kernel << ",\"dilations\":[" << dilation
+      << "],\"head_size\":1,\"head_bias\":true,\"gated\":false,\"activation\":\"Tanh\"}],\"head_scale\":1.0},"
+      << "\"sample_rate\":48000,\"weights\":[";
+    for (int i = 0; i < weights; ++i) f << (i ? ",0.01" : "0.01");
+    f << "]}";
+    return path;
+}
+
+// Loads `path` with the allocation probe armed; returns {loaded, largest single
+// allocation in bytes, milliseconds}.
+struct LoadProbe { bool loaded; std::size_t max_alloc; double ms; std::string err; };
+LoadProbe probe_load(const std::string& path) {
+    NamModel m;
+    std::string err;
+    g_max_alloc = 0;
+    g_count_allocs = true;
+    const auto t0 = std::chrono::steady_clock::now();
+    const bool ok = load_nam(path, m, &err);
+    const auto t1 = std::chrono::steady_clock::now();
+    g_count_allocs = false;
+    return {ok, g_max_alloc.load(), std::chrono::duration<double, std::milli>(t1 - t0).count(), err};
+}
+
+}  // namespace
+
+TEST_CASE("crafted WaveNet shapes are rejected before any large allocation", "[nam][security]") {
+    constexpr std::size_t kSmall = std::size_t{1} << 20;   // largest allocation a rejection may make
+    // Weight count of a one-array, one-channel, ungated A1 model with kernel k and
+    // `layers` dilations, so a crafted file is otherwise well-formed and only the
+    // shape bound under test can reject it.
+    auto mono_weights = [](int k, int layers) { return 1 + layers * (k + 4) + 2 + 1; };
+    const std::string nine = "65536,65536,65536,65536,65536,65536,65536,65536,65536";
+    struct Case { const char* name; const char* kernel; const char* channels; std::string dilation; int weights; };
+    const Case cases[] = {
+        // kernel 4096 x dilation 65536: a 268M-sample reach from a 4K-float file.
+        {"huge-reach", "4096", "1", "65536", mono_weights(4096, 1)},
+        // Nine layers each inside every per-layer limit, together over the reach cap.
+        {"reach-sum", "3", "1", nine, mono_weights(3, 9)},
+        {"huge-kernel", "1000000", "1", "1", 3},
+        {"huge-channels", "3", "100000000", "1", 3},
+        {"fraction", "2.5", "1", "1", 3},
+        {"negative", "-3", "1", "1", 3},
+        // Every field in range; the weights alone would be 2^39 floats.
+        {"wide-history", "4096", "4096", "1,1,1,1,1,1,1,1", 3},
+    };
+    for (const Case& c : cases) {
+        INFO("case " << c.name);
+        const LoadProbe p = probe_load(write_a1(c.name, c.kernel, c.channels, c.dilation, c.weights));
+        INFO("error: " << p.err << " max alloc " << p.max_alloc << " B, " << p.ms << " ms");
+        REQUIRE_FALSE(p.loaded);
+        REQUIRE(p.max_alloc < kSmall);
+        REQUIRE(p.ms < 500.0);
+    }
+    // Control: a valid shape at the same scale of file loads, so the probe is not
+    // passing only because every load fails.
+    const LoadProbe ok = probe_load(write_a1("valid", "3", "1", "65536", mono_weights(3, 1)));
+    INFO("valid error: " << ok.err);
+    REQUIRE(ok.loaded);
+}
+
+TEST_CASE("crafted A2 and ConvNet shapes are rejected before any large allocation", "[nam][security]") {
+    constexpr std::size_t kSmall = std::size_t{1} << 20;
+    {
+        A2ArrayConfig a;
+        a.channels = a.bottleneck = 1;
+        a.kernel_sizes = {4096};
+        a.dilations = {65536};
+        a.activations = {A2Act{}};
+        A2Model m;
+        std::string err;
+        g_max_alloc = 0;
+        g_count_allocs = true;
+        const bool ok = m.build(a, std::vector<float>(8, 0.0f), 48000.0, &err);
+        g_count_allocs = false;
+        INFO("A2 error: " << err);
+        REQUIRE_FALSE(ok);
+        REQUIRE(g_max_alloc.load() < kSmall);
+    }
+    {
+        NamConvNet m;
+        std::string err;
+        std::vector<int> dil(64, 65536);
+        g_max_alloc = 0;
+        g_count_allocs = true;
+        const bool ok = m.build(1, 1, 64, dil, false, Activation::Tanh, std::vector<float>(8, 0.0f), 48000.0, &err);
+        g_count_allocs = false;
+        INFO("ConvNet error: " << err);
+        REQUIRE_FALSE(ok);
+        REQUIRE(g_max_alloc.load() < kSmall);
     }
 }

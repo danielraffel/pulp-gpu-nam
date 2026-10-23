@@ -525,11 +525,9 @@ public:
             ? 1.0f - static_cast<float>(2.0 * M_PI * 10.0 / sample_rate_) : 0.999f;
         for (std::size_t ch = 0; ch < kChannels; ++ch) {
             gate_[ch].set_sample_rate(static_cast<float>(sample_rate_));
-            gate_[ch].reset();
-            for (auto& b : tone_[ch]) b.reset();
             dc_[ch].set_pole(dc_pole);
-            dc_[ch].reset();
         }
+        reset_stream_filters();
         cached_gate_threshold_ = std::nanf("");
         cached_bass_ = cached_middle_ = cached_treble_ = std::nanf("");
 
@@ -613,6 +611,7 @@ public:
         {
             auto cpu = std::make_unique<CpuEngine>();
             for (std::size_t ch = 0; ch < kChannels; ++ch) prepare_cpu_model(cpu->model[ch], model);
+            cpu->prewarmed = cpu->model;
             current_cpu_ = std::move(cpu);
             cpu_active_.store(current_cpu_.get(), std::memory_order_seq_cst);
             // Re-arm the dual-mono fast path for the new engine. The audio-thread
@@ -738,7 +737,7 @@ public:
     void process(audio::BufferView<float>& output,
                  const audio::BufferView<const float>& input,
                  midi::MidiBuffer&, midi::MidiBuffer&,
-                 const format::ProcessContext&) override {
+                 const format::ProcessContext& ctx) override {
         // NAM's decaying state (WaveNet dilation history, LSTM cell tails) generates
         // denormals; flushing them to zero for the whole callback avoids the CPU
         // stalls that show up as xruns in a real DAW. RAII-restored on return.
@@ -754,6 +753,14 @@ public:
         // — the retirement grace is then airtight, not timing-dependent. One atomic
         // op per block (not per sample): negligible on the audio thread.
         audio_epoch_.fetch_add(1, std::memory_order_seq_cst);
+
+        // A host reset (offline render start, a new take) means "start fresh": the
+        // same input after a reset gives the same output as after prepare(),
+        // whatever was processed before. A host may keep processing silence while
+        // stopped and reset rather than reactivate; without this the silence would
+        // leave the gate closed at the start of the render. A transport jump alone
+        // does not reset: with live input the stream never stopped.
+        if (ctx.reset_requested) reset_stream_state();
 
         const bool bypass = state().get_value(kBypass) >= 0.5f;
         const float mix = bypass ? 0.0f : state().get_value(kMix) / 100.0f;
@@ -889,6 +896,9 @@ private:
     // the audio thread loads a pointer to it.
     struct CpuEngine {
         std::array<nam::NamRuntime, kChannels> model{};
+        // The models as prewarmed, before any audio: a host reset copies these back
+        // (same buffer sizes, so the copy does not allocate).
+        std::array<nam::NamRuntime, kChannels> prewarmed{};
     };
 
     // Cabinet IR: one partitioned convolver per channel over the fixed internal
@@ -1119,6 +1129,53 @@ private:
             wet_[i] = ring[pos];
             ring[pos] = in;
             pos = (pos + 1) % d;
+        }
+    }
+
+    // Return the gate, tone stack and DC blocker to their just-prepared state:
+    // gate open, filter histories cleared. Scalar stores only (RT-safe).
+    void reset_stream_filters() {
+        for (std::size_t ch = 0; ch < kChannels; ++ch) {
+            gate_[ch].reset();
+            for (auto& b : tone_[ch]) b.reset();
+            dc_[ch].reset();
+        }
+    }
+
+    // Audio thread, on a host reset: return every piece of stream state to what
+    // prepare() left, so the next block renders exactly as the first block after
+    // prepare(). Allocation-free: the CPU models are copy-assigned from the
+    // prewarmed snapshot into buffers of identical size, and everything else is a
+    // fill or a scalar store. The cost is one copy of the model's weights and
+    // history (a few hundred KB for a standard WaveNet).
+    //
+    // With the GPU engine active only the filters, the CPU models and the cabinet
+    // are reset: the re-block FIFOs and the GPU model history belong to blocks
+    // already in flight on the transport, and the reported latency must not move.
+    void reset_stream_state() {
+        reset_stream_filters();
+        if (CpuEngine* cpu = cpu_active_.load(std::memory_order_seq_cst)) {
+            cpu->model = cpu->prewarmed;
+            nam_diverged_ = false;
+        }
+        IrEngine* cur = ir_active_.load(std::memory_order_seq_cst);
+        IrEngine* prev = ir_prev_.load(std::memory_order_seq_cst);
+        for (std::size_t ch = 0; ch < kChannels; ++ch) {
+            if (cur) cur->conv[ch].reset();
+            if (prev && prev != cur) prev->conv[ch].reset();
+        }
+        if (gpu_active_.load(std::memory_order_seq_cst) != nullptr) return;
+        for (std::size_t ch = 0; ch < kChannels; ++ch) {
+            in_len_[ch] = 0;
+            std::fill(out_buf_[ch].begin(), out_buf_[ch].end(), 0.0f);
+            out_len_[ch] = kInternalBlock;   // primed: B zeros, as prepare() leaves it
+            out_host_len_[ch] = 0;
+            in_rs_[ch].reset();
+            out_rs_[ch].reset();
+            std::fill(dry_ring_[ch].begin(), dry_ring_[ch].end(), 0.0f);
+            dry_pos_[ch] = 0;
+            std::fill(cpu_extra_ring_[ch].begin(), cpu_extra_ring_[ch].end(), 0.0f);
+            cpu_extra_pos_[ch] = 0;
         }
     }
 
@@ -1354,6 +1411,7 @@ private:
         retire_engine(std::shared_ptr<void>(std::move(current_cpu_)));
         auto cpu = std::make_unique<CpuEngine>();
         for (std::size_t ch = 0; ch < kChannels; ++ch) prepare_cpu_model(cpu->model[ch], model);
+        cpu->prewarmed = cpu->model;
         current_cpu_ = std::move(cpu);
         cpu_active_.store(current_cpu_.get(), std::memory_order_seq_cst);
     }

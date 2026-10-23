@@ -28,6 +28,7 @@
 //   head(bottleneck->out_channels, kernel, +bias)
 //   head_scale   (one trailing scalar)
 
+#include "nam_limits.hpp"
 #include "nam_model.hpp"   // Conv
 
 #include <cassert>
@@ -197,6 +198,35 @@ public:
     bool build(A2ArrayConfig arr, std::vector<float> weights, double sample_rate,
                std::string* error = nullptr) {
         auto fail = [&](const std::string& m) { if (error) *error = m; return false; };
+        // Bound the shape before configure() allocates anything sized by it.
+        if (arr.channels < 1 || arr.channels > kMaxChannels || arr.bottleneck < 1 || arr.bottleneck > kMaxChannels
+            || arr.input_size < 1 || arr.input_size > kMaxChannels || arr.condition_size < 1
+            || arr.condition_size > kMaxChannels || arr.head_out < 1 || arr.head_out > kMaxChannels
+            || arr.head_kernel < 1 || arr.head_kernel > kMaxKernelSize
+            || arr.kernel_sizes.size() != arr.dilations.size())
+            return fail("A2 layer shape out of range");
+        {
+            const std::size_t C = static_cast<std::size_t>(arr.channels);
+            const std::size_t B = static_cast<std::size_t>(arr.bottleneck);
+            const std::size_t Z = 2 * B;   // upper bound: gated layers double the conv width
+            long rf = arr.head_kernel - 1;
+            std::size_t floats = C * static_cast<std::size_t>(arr.input_size)
+                                 + static_cast<std::size_t>(arr.head_out) * B
+                                       * static_cast<std::size_t>(arr.head_kernel) * 2u;
+            for (std::size_t i = 0; i < arr.dilations.size(); ++i) {
+                const long k = arr.kernel_sizes[i], d = arr.dilations[i];
+                if (k < 1 || k > kMaxKernelSize || d < 1 || d > (1L << 16))
+                    return fail("A2 layer kernel size or dilation out of range");
+                rf += (k - 1) * d;
+                if (rf > kMaxReceptiveField)
+                    return fail("A2 receptive field exceeds " + std::to_string(kMaxReceptiveField) + " samples");
+                floats += Z * C * static_cast<std::size_t>(k) + 2 * Z
+                          + Z * static_cast<std::size_t>(arr.condition_size) + C * B + C
+                          + (static_cast<std::size_t>((k - 1) * d) + 1u) * C;
+            }
+            if (floats > kMaxModelFloats)
+                return fail("A2 model would allocate more than " + std::to_string(kMaxModelFloats) + " floats");
+        }
         array_.configure(arr);
         const std::size_t expected = array_.weight_count() + 1;   // +1 head_scale
         if (weights.size() != expected)
