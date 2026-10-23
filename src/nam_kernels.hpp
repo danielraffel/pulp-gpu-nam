@@ -300,31 +300,39 @@ void kernel_generic(const float* __restrict wt, const float* __restrict x, float
     }
 }
 
-// z[r] += sum_j wt[j*R + r] * v[j] for one input vector (a recurrent step):
-// rows in register tiles of 32 so the accumulators stay resident across all j.
-inline void matvec_acc(const float* __restrict wt, const float* __restrict v, float* __restrict z, int R, int C) {
-    constexpr int T = 32;
+// One tile of matvec_acc: V four-lane accumulators, i.e. 4V rows, live in
+// registers across the whole column loop. Wider tiles give the FMA pipes more
+// independent chains; each row still sums its columns in order, so every tile
+// width produces the same bits.
+template <int V>
+GPU_NAM_ALWAYS_INLINE void matvec_tile(const float* __restrict wt, const float* __restrict v, float* __restrict z,
+                                       int R, int C) {
+    v4f acc[V];
+    for (int i = 0; i < V; ++i) acc[i] = load4(z + 4 * i);
+    for (int j = 0; j < C; ++j) {
+        const float* w = wt + static_cast<std::ptrdiff_t>(j) * R;
+        const float vj = v[j];
+        for (int i = 0; i < V; ++i) acc[i] += load4(w + 4 * i) * vj;
+    }
+    for (int i = 0; i < V; ++i) store4(z + 4 * i, acc[i]);
+}
+
+// z[r] += sum_j wt[j*R + r] * v[j] for one input vector (a recurrent step), with
+// the rows in register tiles so the accumulators stay resident across all j.
+GPU_NAM_ALWAYS_INLINE void matvec_acc(const float* __restrict wt, const float* __restrict v, float* __restrict z,
+                                      int R, int C) {
+    // The LSTM gate stack is R = 4 * hidden; the common hidden sizes get one tile.
+    switch (R) {
+        case 96: matvec_tile<24>(wt, v, z, R, C); return;
+        case 80: matvec_tile<20>(wt, v, z, R, C); return;
+        case 64: matvec_tile<16>(wt, v, z, R, C); return;
+        case 48: matvec_tile<12>(wt, v, z, R, C); return;
+        default: break;
+    }
     int r0 = 0;
-    for (; r0 + T <= R; r0 += T) {
-        float acc[T];
-        for (int i = 0; i < T; ++i) acc[i] = z[r0 + i];
-        for (int j = 0; j < C; ++j) {
-            const float* w = wt + static_cast<std::ptrdiff_t>(j) * R + r0;
-            const float vj = v[j];
-            for (int i = 0; i < T; ++i) acc[i] += w[i] * vj;
-        }
-        for (int i = 0; i < T; ++i) z[r0 + i] = acc[i];
-    }
-    for (; r0 + 8 <= R; r0 += 8) {
-        float acc[8];
-        for (int i = 0; i < 8; ++i) acc[i] = z[r0 + i];
-        for (int j = 0; j < C; ++j) {
-            const float* w = wt + static_cast<std::ptrdiff_t>(j) * R + r0;
-            const float vj = v[j];
-            for (int i = 0; i < 8; ++i) acc[i] += w[i] * vj;
-        }
-        for (int i = 0; i < 8; ++i) z[r0 + i] = acc[i];
-    }
+    for (; r0 + 64 <= R; r0 += 64) matvec_tile<16>(wt + r0, v, z + r0, R, C);
+    for (; r0 + 32 <= R; r0 += 32) matvec_tile<8>(wt + r0, v, z + r0, R, C);
+    for (; r0 + 8 <= R; r0 += 8) matvec_tile<2>(wt + r0, v, z + r0, R, C);
     for (; r0 < R; ++r0) {
         float acc = z[r0];
         for (int j = 0; j < C; ++j) acc += wt[static_cast<std::ptrdiff_t>(j) * R + r0] * v[j];
@@ -363,7 +371,7 @@ inline KernelFn pick_kernel(Epi e, int Z, int C) {
     KernelFn f = nullptr;
     switch (e) {
         case Epi::Acc: f = detail::pick_any<Epi::Acc, 1, 2, 3, 4, 6, 8, 12, 16, 24, 32>(Z, C); break;
-        case Epi::Store: f = detail::pick_any<Epi::Store, 1, 2, 3, 4, 6, 8, 12, 16, 24, 32>(Z, C); break;
+        case Epi::Store: f = detail::pick_any<Epi::Store, 1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96>(Z, C); break;
         case Epi::AccBiasMix: f = detail::pick_layer<Epi::AccBiasMix, 1, 2, 3, 4, 6, 8, 12, 16, 24, 32>(Z, C); break;
         case Epi::StoreBiasMix: f = detail::pick_any<Epi::StoreBiasMix, 1, 2, 3, 4, 6, 8, 12, 16, 24, 32>(Z, C); break;
         case Epi::BiasResid: f = detail::pick_layer<Epi::BiasResid, 1, 2, 3, 4, 6, 8, 12, 16, 24, 32>(Z, C); break;

@@ -362,3 +362,35 @@ TEST_CASE("LSTM streaming is allocation-free in every tanh mode", "[nam][lstm][r
     g_count_allocs = false;
     REQUIRE(g_allocs.load() == 0);
 }
+
+TEST_CASE("LSTM run processing is bit-identical to per-sample processing", "[nam][lstm]") {
+    // process() runs layer-major over runs of frames (the input half batched);
+    // process_sample() steps every layer per sample. Every term is added in the
+    // same order, so the outputs and the carried state must match exactly, in
+    // every tanh mode and across run boundaries.
+    const auto x = lstm_signal(3000);
+    // Hidden sizes cover every recurrent-product tile width (4H = 12, 32, 48, 64,
+    // 80, 96, 128) and both gate paths (fused NamRational, array-wide passes).
+    for (const TanhMode mode : {TanhMode::Exact, TanhMode::Vector, TanhMode::NamRational})
+    for (int hidden : {3, 8, 12, 16, 20, 24, 32}) {
+        INFO("hidden " << hidden);
+        NamLstmModel runm = seeded_lstm(hidden, 3, 0x51u + static_cast<std::uint32_t>(hidden));
+        NamLstmModel step = runm;
+        runm.set_tanh_mode(mode);
+        step.set_tanh_mode(mode);
+        runm.reset();
+        step.reset();
+        std::vector<float> yr(x.size()), ys(x.size());
+        std::size_t pos = 0;
+        for (std::uint32_t n : {1u, 127u, 128u, 129u, 500u, 1024u, 1091u}) {
+            runm.process(x.data() + pos, yr.data() + pos, n);
+            pos += n;
+        }
+        REQUIRE(pos == x.size());
+        for (std::size_t i = 0; i < x.size(); ++i) ys[i] = step.process_sample(x[i]);
+        REQUIRE(yr == ys);
+        // State carries over: interleaving the two entry points stays identical.
+        float a = runm.process_sample(0.25f), b = step.process_sample(0.25f);
+        REQUIRE(a == b);
+    }
+}

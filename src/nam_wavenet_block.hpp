@@ -50,18 +50,26 @@ public:
             return r;
         };
         std::size_t max_c = 1, max_z = 1, max_h = 1;
+        int prev_width = 1;   // stored width of the previous array's output (array 0 reads x)
         for (std::size_t ai = 0; ai < cfgs.size(); ++ai) {
             const LayerArrayConfig& c = cfgs[ai];
             if (c.condition_size != 1 || c.channels <= 0 || c.kernel_size <= 0 || c.head_size <= 0) return false;
             if (ai > 0 && cfgs[ai - 1].head_size != c.channels) return false;
+            if (ai > 0 && c.input_size != cfgs[ai - 1].channels) return false;
+            // Widths above four are stored padded to a multiple of four so every
+            // product runs the four-lane kernels; padded rows and columns carry zero
+            // weights and stay zero (or never reach a non-zero weight), so outputs
+            // are unchanged. Widths of four or less keep their exact-width kernels:
+            // padding 2 to 4 would double the work of a nano array.
+            const int C = c.channels, H = c.head_size;
+            const int P = pad_width(C), Hp = pad_width(H);
             Array a;
-            a.in = c.input_size;
-            a.C = c.channels;
-            a.H = c.head_size;
-            const int C = a.C;
-            const float* rw = take(static_cast<std::size_t>(C) * a.in);
+            a.in = ai == 0 ? c.input_size : prev_width;
+            a.C = P;
+            a.H = Hp;
+            const float* rw = take(static_cast<std::size_t>(C) * c.input_size);
             if (!rw) return false;
-            a.rechannel = make_mat(rw, C, a.in, 1, 0, kernels::Epi::Store);
+            a.rechannel = make_mat(rw, C, c.input_size, 1, 0, P, a.in, identity_rows, kernels::Epi::Store);
             for (int d : c.dilations) {
                 Layer L;
                 L.K = c.kernel_size;
@@ -70,7 +78,9 @@ public:
                 L.gated = c.gated;
                 L.act = parse_activation(c.activation);
                 const int Z = c.gated ? 2 * C : C;
-                L.Z = Z;
+                L.Z = c.gated ? 2 * P : P;
+                // Gated rows are [tanh half | gate half]; the gate half moves to row P.
+                const RowMap rows = c.gated ? RowMap{C, P} : identity_rows;
                 const float* cw = take(static_cast<std::size_t>(Z) * C * L.K);
                 const float* cb = take(static_cast<std::size_t>(Z));
                 const float* mw = take(static_cast<std::size_t>(Z));
@@ -84,38 +94,37 @@ public:
                                            : first       ? kernels::Epi::Store
                                            : last        ? kernels::Epi::AccBiasMix
                                                          : kernels::Epi::Acc;
-                    L.taps.push_back(make_mat(cw, Z, C, L.K, k, e));
+                    L.taps.push_back(make_mat(cw, Z, C, L.K, k, L.Z, P, rows, e));
                 }
-                L.conv_b.assign(cb, cb + Z);
-                L.mixin.assign(mw, mw + Z);
-                L.l1 = make_mat(lw, C, C, 1, 0, kernels::Epi::BiasResid);
-                L.l1_b.assign(lb, lb + C);
+                L.conv_b = pad_vector(cb, Z, L.Z, rows);
+                L.mixin = pad_vector(mw, Z, L.Z, rows);
+                L.l1 = make_mat(lw, C, C, 1, 0, P, P, identity_rows, kernels::Epi::BiasResid);
+                L.l1_b = pad_vector(lb, C, P, identity_rows);
                 L.span = std::max(L.reach, 4 * kRun);
-                L.hist.assign(static_cast<std::size_t>(L.reach + L.span) * C, 0.0f);
-                max_z = std::max<std::size_t>(max_z, static_cast<std::size_t>(Z));
+                L.hist.assign(static_cast<std::size_t>(L.reach + L.span) * P, 0.0f);
+                max_z = std::max<std::size_t>(max_z, static_cast<std::size_t>(L.Z));
                 a.layers.push_back(std::move(L));
             }
             if (a.layers.empty()) return false;
-            const float* hw = take(static_cast<std::size_t>(a.H) * C);
+            const float* hw = take(static_cast<std::size_t>(H) * C);
             if (!hw) return false;
-            a.head = make_mat(hw, a.H, C, 1, 0, kernels::Epi::StoreBiasMix);
-            a.head_b.assign(static_cast<std::size_t>(a.H), 0.0f);
-            a.head_mix.assign(static_cast<std::size_t>(a.H), 0.0f);   // head has no mixin
+            a.head = make_mat(hw, H, C, 1, 0, Hp, P, identity_rows, kernels::Epi::StoreBiasMix);
+            a.head_b.assign(static_cast<std::size_t>(Hp), 0.0f);
+            a.head_mix.assign(static_cast<std::size_t>(Hp), 0.0f);   // head has no mixin
             if (c.head_bias) {
-                const float* hb = take(static_cast<std::size_t>(a.H));
+                const float* hb = take(static_cast<std::size_t>(H));
                 if (!hb) return false;
-                a.head_b.assign(hb, hb + a.H);
+                a.head_b = pad_vector(hb, H, Hp, identity_rows);
             }
-            max_c = std::max<std::size_t>(max_c, static_cast<std::size_t>(C));
-            max_h = std::max<std::size_t>(max_h, static_cast<std::size_t>(a.H));
+            max_c = std::max<std::size_t>(max_c, static_cast<std::size_t>(P));
+            max_h = std::max<std::size_t>(max_h, static_cast<std::size_t>(Hp));
+            prev_width = P;
             arrays_.push_back(std::move(a));
         }
         const float* hs = take(1);
         if (!hs || p != end) return false;
         head_scale_ = *hs;
-        if (arrays_.front().in != 1) return false;
-        for (std::size_t ai = 1; ai < arrays_.size(); ++ai)
-            if (arrays_[ai].in != arrays_[ai - 1].C) return false;
+        if (cfgs.front().input_size != 1) return false;
 
         const std::size_t run = static_cast<std::size_t>(kRun);
         z_.assign(run * max_z, 0.0f);
@@ -178,16 +187,35 @@ private:
         std::vector<Layer> layers;
     };
 
-    // W is [Z][C][K] row-major; extract tap k transposed.
-    static Mat make_mat(const float* w, int Z, int C, int K, int k, kernels::Epi epi) {
+    static int pad_width(int n) { return n > 4 ? (n + 3) & ~3 : n; }
+
+    // Maps a source row to its stored row: rows below `split` keep their index,
+    // the rest move up to start at `to` (the gate half of a padded gated layer).
+    struct RowMap {
+        int split = 0, to = 0;
+        int operator()(int r) const { return r < split ? r : to + (r - split); }
+    };
+    static constexpr RowMap identity_rows{1 << 30, 0};
+
+    static std::vector<float> pad_vector(const float* v, int n, int stored, RowMap rows) {
+        std::vector<float> out(static_cast<std::size_t>(stored), 0.0f);
+        for (int i = 0; i < n; ++i) out[static_cast<std::size_t>(rows(i))] = v[i];
+        return out;
+    }
+
+    // W is [Z][C][K] row-major; extract tap k transposed into a Zs x Cs stored
+    // matrix (wt[j*Zs + z]), zero outside the source rows and columns.
+    static Mat make_mat(const float* w, int Z, int C, int K, int k, int Zs, int Cs, RowMap rows,
+                        kernels::Epi epi) {
         Mat m;
-        m.Z = Z;
-        m.C = C;
-        m.wt.resize(static_cast<std::size_t>(Z) * C);
+        m.Z = Zs;
+        m.C = Cs;
+        m.wt.assign(static_cast<std::size_t>(Zs) * Cs, 0.0f);
         for (int z = 0; z < Z; ++z)
             for (int j = 0; j < C; ++j)
-                m.wt[static_cast<std::size_t>(j) * Z + z] = w[(static_cast<std::size_t>(z) * C + j) * K + k];
-        m.fn = kernels::pick_kernel(epi, Z, C);
+                m.wt[static_cast<std::size_t>(j) * Zs + rows(z)] =
+                    w[(static_cast<std::size_t>(z) * C + j) * K + k];
+        m.fn = kernels::pick_kernel(epi, Zs, Cs);
         return m;
     }
 

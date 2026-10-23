@@ -11,6 +11,7 @@
 #include <fstream>
 #include <new>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "nam_model.hpp"
@@ -406,6 +407,13 @@ std::vector<std::pair<const char*, std::vector<LayerArrayConfig>>> engine_shapes
         {"activations", {arr(1, 8, 8, {1, 2}, false, 3, false, "Hardtanh"),
                          arr(8, 8, 4, {4}, false, 3, false, "ReLU"),
                          arr(8, 4, 1, {8}, true, 3, false, "Sigmoid")}},
+        // Widths that are not a multiple of four are stored padded; a Sigmoid
+        // layer turns the zero padding into 0.5, which must never reach the output.
+        {"padded-sigmoid", {arr(1, 6, 3, {1, 2, 4}, false, 3, false, "Sigmoid"),
+                            arr(6, 3, 1, {8, 16}, true, 3, true, "Sigmoid")}},
+        // Gated layers at Z = 2C, and kernels longer than the usual 3.
+        {"gated-kernel4", {arr(1, 8, 4, {1, 2, 4}, false, 3, true), arr(8, 4, 1, {8}, true, 4, true)}},
+        {"long-kernel", {arr(1, 8, 4, {1, 3}, false, 20), arr(8, 4, 1, {2}, true, 17)}},
     };
 }
 
@@ -532,4 +540,33 @@ TEST_CASE("block engine streaming is allocation-free", "[nam][block][rt-safety]"
     m.process(x.data() + 5000, y.data() + 5000, 1000);
     g_count_allocs = false;
     REQUIRE(g_allocs.load() == 0);
+}
+
+namespace {
+std::vector<float> seeded_floats(std::size_t n, std::uint32_t seed) {
+    std::vector<float> v(n);
+    for (auto& f : v) {
+        seed = seed * 1664525u + 1013904223u;
+        f = static_cast<float>(static_cast<std::int32_t>(seed >> 8) % 2001 - 1000) / 1000.0f;
+    }
+    return v;
+}
+}  // namespace
+
+TEST_CASE("matvec_acc tiles give the bits of a plain per-row sum", "[nam][kernels]") {
+    for (int R : {1, 3, 8, 12, 32, 40, 48, 64, 80, 96, 128, 136})
+    for (int C : {1, 3, 24}) {
+        INFO("R " << R << " C " << C);
+        const auto wt = seeded_floats(static_cast<std::size_t>(R) * C, 7u + R * 31u + C);
+        const auto v = seeded_floats(static_cast<std::size_t>(C), 11u + C);
+        auto z = seeded_floats(static_cast<std::size_t>(R), 13u + R);
+        std::vector<float> want = z;
+        for (int r = 0; r < R; ++r) {
+            float acc = want[static_cast<std::size_t>(r)];
+            for (int j = 0; j < C; ++j) acc += wt[static_cast<std::size_t>(j) * R + r] * v[static_cast<std::size_t>(j)];
+            want[static_cast<std::size_t>(r)] = acc;
+        }
+        kernels::matvec_acc(wt.data(), v.data(), z.data(), R, C);
+        REQUIRE(z == want);
+    }
 }
