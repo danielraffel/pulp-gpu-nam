@@ -25,7 +25,9 @@
 #include <chrono>
 #include <cmath>
 #include <fstream>
+#include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 using namespace pulp::examples;
@@ -971,6 +973,7 @@ struct ResetRender {
     std::vector<float> out;
     std::size_t latency = 0;
     long reset_block_allocs = 0;
+    std::string arch;   // the architecture actually prepared ("none" if the load failed)
 };
 ResetRender render_reset_case(double sr, const std::vector<float>& pre, int pre_blocks, bool reset,
                               const std::vector<float>& x, int x_blocks, int jump_at = -1,
@@ -992,6 +995,7 @@ ResetRender render_reset_case(double sr, const std::vector<float>& pre, int pre_
     for (int b = 0; b < pre_blocks; ++b) d.block_io(pre, 0);
     ResetRender r;
     r.latency = static_cast<std::size_t>(proc.latency_samples());
+    r.arch = proc.model_arch();
     for (int b = 0; b < x_blocks; ++b) {
         d.pctx.reset_requested = reset && b == 0;
         d.pctx.transport_jump = b == jump_at;
@@ -2010,9 +2014,13 @@ TEST_CASE("GPU NAM host reset is exact and allocation-free for LSTM and A2 model
     const auto a2 = (std::filesystem::temp_directory_path() / "gpu_nam_reset_a2.nam").string();
     std::ofstream(a2, std::ios::binary) << slim_container_nam(2.0f, 3.0f);
     const std::string lstm = std::string(GPU_NAM_MODELS_DIR) + "/lstm.nam";
-    for (const std::string& model : {lstm, a2}) {
+    // load_model() reports nothing, and a failed load runs dry, so check that the
+    // intended architecture is the one actually prepared.
+    const std::pair<std::string, const char*> models[] = {{lstm, "LSTM"}, {a2, "WaveNet-A2"}};
+    for (const auto& [model, arch] : models) {
         INFO("model " << model);
         const auto fresh = render_reset_case(48000.0, loud, 0, false, x, 12, -1, model);
+        REQUIRE(fresh.arch == arch);
         const auto stale = render_reset_case(48000.0, loud, 40, false, x, 12, -1, model);
         const auto reset = render_reset_case(48000.0, loud, 40, true, x, 12, -1, model);
         REQUIRE(energy_from(fresh.out, fresh.latency, BLOCK) > 1e-6);
