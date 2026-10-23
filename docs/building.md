@@ -109,7 +109,11 @@ The last step renders 8 captures in the default and exact tanh modes at block
 sizes 37, 64, 128 and 512. It then checks that every output file has the
 SHA-256 stored in `tools/cpu-engine/render-hashes.json`. A performance change
 must keep the output byte-identical. If a change is meant to alter the output,
-re-record the hashes with `--update` and say why in the PR.
+re-record the hashes with `--update` and say why in the PR. On a mismatch the
+check prints the new hashes for its platform. A manual run of the workflow with
+`update` set re-records the Linux hashes and uploads the file as an artifact,
+so a runner toolchain change can be re-recorded without a Linux machine. CI pins
+GCC 13, the compiler the stored hashes were recorded with.
 
 Hashes are stored per platform, and each platform is compared only with itself.
 `linux-x86_64` (CI, GCC) and `darwin-arm64` (Apple clang) share no hashes. arm64

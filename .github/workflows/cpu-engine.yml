@@ -8,6 +8,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      update:
+        description: "Re-record this runner's hashes and upload render-hashes.json as an artifact"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -20,6 +25,10 @@ jobs:
   linux:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    # Pinned compiler: the stored linux-x86_64 hashes were recorded with GCC 13.
+    env:
+      CC: gcc-13
+      CXX: g++-13
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
       - name: Configure
@@ -29,4 +38,14 @@ jobs:
       - name: Unit suites
         run: ctest --test-dir build-cpu --output-on-failure
       - name: Output is byte-identical to the stored hashes
+        if: ${{ !inputs.update }}
         run: python3 tools/cpu-engine/render_hashes.py --render build-cpu/gpu-nam-golden-render
+      - name: Re-record this runner's hashes
+        if: ${{ inputs.update }}
+        run: python3 tools/cpu-engine/render_hashes.py --render build-cpu/gpu-nam-golden-render --update
+      - name: Upload re-recorded hashes
+        if: ${{ inputs.update }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: render-hashes
+          path: tools/cpu-engine/render-hashes.json

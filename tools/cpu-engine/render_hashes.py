@@ -83,6 +83,9 @@ def main():
         for k in extra:
             print(f"NEW      {k} (no stored hash)")
         print(f"FAIL: {len(changed)} of {len(want)} renders differ from the stored hashes for {a.platform}")
+        print("If the change is intended (or the toolchain changed), these are this platform's new hashes;")
+        print("record them with --update, or paste this entry into render-hashes.json:")
+        print(json.dumps({a.platform: got}, indent=2, sort_keys=True))
         return 1
     print(f"OK: {len(got)} renders byte-identical to the stored hashes for {a.platform}")
     return 0
