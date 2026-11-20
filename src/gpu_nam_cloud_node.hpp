@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <pulp/audio/buffer.hpp>
 #include <pulp/gpu_audio/gpu_audio_node.hpp>
+#include <pulp/render/gpu_surface.hpp>
 
 #include <array>
 #include <memory>
@@ -38,11 +39,13 @@ inline constexpr std::uint32_t kNamChannels = 64;
 class GpuNamCloudNode : public gpu_audio::GpuAudioNode {
 public:
     GpuNamCloudNode(std::uint32_t channels, std::uint32_t block_size,
-                    std::uint32_t sample_rate, const nam::NamModel* model)
+                    std::uint32_t sample_rate, const nam::NamModel* model,
+                    render::GpuSurface* surface = nullptr)
         : channels_(channels),
           block_size_(block_size),
           sample_rate_(sample_rate),
-          model_(model) {}
+          model_(model),
+          surface_(surface) {}
 
     gpu_audio::GpuAudioNodeDescriptor descriptor() const override {
         gpu_audio::GpuAudioNodeDescriptor d;
@@ -65,15 +68,28 @@ public:
     // processor routes the inline CPU engine) if no device is available or the
     // model shape is unsupported on the GPU.
     bool prepare() override {
+        // The host path must provide its surface. Standalone creation belongs
+        // only to GpuNam's explicit diagnostic preparation API. Failing closed
+        // here preserves the transport's CPU fallback until the plugin-host
+        // surface lease is wired through in the next migration step.
+        if (surface_ == nullptr) return false;
+        return prepare_from_surface(*surface_);
+    }
+
+    // Non-RT: adopt the host-owned device and prepare one plan per channel.
+    // The surface is borrowed and must outlive this node.
+    bool prepare_from_surface(render::GpuSurface& surface) {
         prepared_program_ = {};
         if (!model_ || channels_ == 0 || channels_ > kNamChannels) return false;
         fallback_write_slot_ = 0;
         for (auto& slots : fallback_slots_)
             slots.clear();
-        // One device for all channels. If it can't be created, fail closed so the
-        // processor routes the inline CPU engine (same contract as before).
+        surface_ = &surface;
+        // One compute object for all channels, initialized from the host's
+        // already-created surface. If adoption fails, the processor routes the
+        // inline CPU engine (same contract as before).
         shared_gpu_ = render::GpuCompute::create();
-        if (!shared_gpu_ || !shared_gpu_->initialize_standalone()) return false;
+        if (!shared_gpu_ || !shared_gpu_->initialize_from_surface(surface)) return false;
         // Prewarm both the GPU forward's on-device history and the CPU fallback to
         // the model's silence steady-state (a NAM capture's silence response is not
         // zero, and the dilated history takes a full receptive field to populate).
@@ -203,6 +219,7 @@ private:
     std::uint32_t block_size_ = 0;
     std::uint32_t sample_rate_ = 0;
     const nam::NamModel* model_ = nullptr;
+    render::GpuSurface* surface_ = nullptr; // borrowed host surface
 
     // One device shared by every channel; each GpuNam below holds a non-owning
     // pointer to it and its own (block_size, instance=channel) plan slot.
