@@ -90,6 +90,9 @@ endif()
 # CMAKE_PREFIX_PATH at the SDK install prefix when enabling it.
 option(GPU_NAM_USE_INSTALLED_PULP
     "Build against an installed Pulp SDK (find_package(Pulp)) instead of the ./pulp submodule" OFF)
+set(GPU_NAM_EXPECTED_PULP_VERSION "1.172.1" CACHE STRING "Exact installed Pulp package version")
+set(GPU_NAM_EXPECTED_VELLUM_VERSION "0.2.2" CACHE STRING "Exact installed Vellum package version")
+set(GPU_NAM_EXPECTED_VELLUM_GPU_RUNTIME_VERSION "0.1.10" CACHE STRING "Exact installed VellumGpuRuntime package version")
 
 set(GPU_NAM_EXPECTED_PULP_SOURCE_SHA "" CACHE STRING
     "Optional exact installed Pulp SDK source commit for validation")
@@ -104,8 +107,16 @@ if(GPU_NAM_USE_INSTALLED_PULP)
     # CMake helpers this plugin uses — pulp_add_plugin() (PulpUtils) and the
     # relocatable-bundle helpers (PulpBundleRelocatable), both included by
     # PulpConfig.cmake — so none of the submodule wiring below runs.
-    find_package(Pulp REQUIRED GLOBAL)
+    find_package(Pulp ${GPU_NAM_EXPECTED_PULP_VERSION} EXACT REQUIRED GLOBAL)
+    find_package(Vellum ${GPU_NAM_EXPECTED_VELLUM_VERSION} EXACT REQUIRED CONFIG GLOBAL)
+    find_package(VellumGpuRuntime ${GPU_NAM_EXPECTED_VELLUM_GPU_RUNTIME_VERSION} EXACT REQUIRED CONFIG GLOBAL)
     gpu_nam_validate_sdk_contract()
+    foreach(_vellum_target IN ITEMS Vellum::Graphics Vellum::Gpu
+        VellumGpuRuntime::DeviceApi VellumGpuRuntime::Device)
+        if(NOT TARGET ${_vellum_target})
+            message(FATAL_ERROR "Installed SDK is missing required target ${_vellum_target}")
+        endif()
+    endforeach()
     message(STATUS "GPU NAM: building against installed Pulp SDK ${Pulp_VERSION} (${Pulp_DIR})")
 
     # The install export namespaces targets as Pulp:: ; the in-tree submodule
@@ -211,4 +222,11 @@ if(GPU_NAM_BUILD_TESTS)
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/validation/test_gpu_nam_production_receipt.py)
     set_tests_properties(gpu-nam-production-receipt-contract PROPERTIES
         LABELS "validation;receipt")
+    if(GPU_NAM_USE_INSTALLED_PULP)
+        add_test(NAME gpu-nam-installed-sdk-consumer
+            COMMAND ${Python3_EXECUTABLE} -B
+                ${CMAKE_CURRENT_SOURCE_DIR}/tools/validation/test_installed_sdk_consumer.py)
+        set_tests_properties(gpu-nam-installed-sdk-consumer PROPERTIES
+            ENVIRONMENT "GPU_NAM_PULP_SDK=${PULP_SDK_DIR};GPU_NAM_VELLUM_SDK=$ENV{GPU_NAM_VELLUM_SDK}")
+    endif()
 endif()
