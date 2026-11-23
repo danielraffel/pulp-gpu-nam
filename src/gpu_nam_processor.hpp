@@ -371,7 +371,20 @@ public:
         surface_lease_generation_.fetch_add(1, std::memory_order_release);
     }
 
-    void invalidate_gpu_surface_lease() { set_gpu_surface_lease({}); }
+    void invalidate_gpu_surface_lease() { invalidate_gpu_surface(); }
+
+    // Bridge methods for a view host observer. The source owns only the lease
+    // state, never the host surface. Call invalidate before the host destroys
+    // or replaces its surface.
+    void publish_gpu_surface(render::GpuSurface* surface) {
+        surface_lease_source_.publish(surface);
+        set_gpu_surface_lease(surface_lease_source_.lease());
+    }
+
+    void invalidate_gpu_surface() {
+        surface_lease_source_.invalidate();
+        set_gpu_surface_lease({});
+    }
 
     /// Legacy {worker-produced blocks, transport misses}. UI/main-thread only.
     /// These are not selected GPU output or proof of a CPU fallback delivery.
@@ -1855,6 +1868,7 @@ private:
     std::atomic<std::uint32_t> model_req_generation_{0};
     std::uint32_t last_seen_model_gen_ = 0;
     mutable std::mutex surface_lease_mutex_;
+    GpuNamSurfaceLeaseSource surface_lease_source_;
     GpuNamSurfaceLease surface_lease_;
     std::atomic<std::uint32_t> surface_lease_generation_{0};
     std::uint32_t last_seen_surface_lease_gen_ = 0;
