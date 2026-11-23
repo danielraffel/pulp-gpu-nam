@@ -19,6 +19,7 @@
 
 #include "gpu_nam.hpp"
 #include "gpu_nam_prepared_program.hpp"
+#include "gpu_nam_surface_lease.hpp"
 #include "nam_model.hpp"
 
 #include <algorithm>
@@ -40,12 +41,14 @@ class GpuNamCloudNode : public gpu_audio::GpuAudioNode {
 public:
     GpuNamCloudNode(std::uint32_t channels, std::uint32_t block_size,
                     std::uint32_t sample_rate, const nam::NamModel* model,
-                    render::GpuSurface* surface = nullptr)
+                    render::GpuSurface* surface = nullptr,
+                    GpuNamSurfaceLease lease = {})
         : channels_(channels),
           block_size_(block_size),
           sample_rate_(sample_rate),
           model_(model),
-          surface_(surface) {}
+          surface_(surface),
+          lease_(std::move(lease)) {}
 
     gpu_audio::GpuAudioNodeDescriptor descriptor() const override {
         gpu_audio::GpuAudioNodeDescriptor d;
@@ -72,8 +75,9 @@ public:
         // only to GpuNam's explicit diagnostic preparation API. Failing closed
         // here preserves the transport's CPU fallback until the plugin-host
         // surface lease is wired through in the next migration step.
-        if (surface_ == nullptr) return false;
-        return prepare_from_surface(*surface_);
+        auto* surface = lease_.get();
+        if (!surface) return false;
+        return prepare_from_surface(*surface);
     }
 
     // Non-RT: adopt the host-owned device and prepare one plan per channel.
@@ -187,6 +191,10 @@ public:
                 for (std::uint32_t i = 0; i < n; ++i) out[i] = 0.0f;
                 continue;
             }
+            if (lease_.generation() != 0 && !lease_) {
+                cpu_[ch].process(in, out, n);
+                continue;
+            }
             // On device loss / readback timeout, forward() leaves `out` holding the
             // previous block (a stuck, repeating block if published as-is). Fall back
             // to the prewarmed per-channel CPU oracle so the worker still emits fresh,
@@ -220,6 +228,7 @@ private:
     std::uint32_t sample_rate_ = 0;
     const nam::NamModel* model_ = nullptr;
     render::GpuSurface* surface_ = nullptr; // borrowed host surface
+    GpuNamSurfaceLease lease_;
 
     // One device shared by every channel; each GpuNam below holds a non-owning
     // pointer to it and its own (block_size, instance=channel) plan slot.
