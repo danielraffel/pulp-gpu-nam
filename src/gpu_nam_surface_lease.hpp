@@ -1,11 +1,13 @@
 #pragma once
 
-#include <pulp/render/gpu_surface.hpp>
-
 #include <atomic>
 #include <cstdint>
 #include <memory>
 #include <utility>
+
+namespace pulp::render {
+class GpuSurface;
+}
 
 namespace pulp::examples {
 
