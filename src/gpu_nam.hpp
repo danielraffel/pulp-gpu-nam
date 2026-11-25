@@ -28,6 +28,18 @@ public:
         return prepare_with(*owned_gpu_, model, block_size);
     }
 
+    // Prepare a compute object against the device owned by a caller-provided
+    // surface. The surface remains owned by the caller and is never destroyed
+    // by this object. The caller must keep it alive until this GpuNam is
+    // destroyed, matching GpuCompute's non-owning device-sharing contract.
+    bool prepare_from_surface(render::GpuSurface& surface, const NamModel& model,
+                              std::uint32_t block_size,
+                              std::uint32_t instance = 0) {
+        owned_gpu_ = render::GpuCompute::create();
+        if (!owned_gpu_ || !owned_gpu_->initialize_from_surface(surface)) return false;
+        return prepare_with(*owned_gpu_, model, block_size, instance);
+    }
+
     // Prepare against a caller-owned GpuCompute (e.g. one shared by both stereo
     // channels, or one sharing a device with a render surface). The caller keeps
     // ownership of `gpu`. `instance` selects an independent plan slot on that
@@ -78,6 +90,7 @@ public:
     }
 
     std::uint32_t block_size() const { return block_size_; }
+    std::uint32_t instance() const { return instance_; }
     render::GpuCompute* gpu() const { return gpu_; }
 
 private:
