@@ -1344,7 +1344,9 @@ private:
             std::lock_guard<std::mutex> lock(surface_lease_mutex_);
             lease = surface_lease_;
         }
-        if (!lease) return nullptr;
+        // An empty lease (generation 0) builds on the node's own device; a
+        // handed-over lease that is no longer current builds nothing.
+        if (lease.generation() != 0 && !lease) return nullptr;
         auto stack = std::make_unique<GpuStack>();
         stack->surface_lease = lease;
         stack->model = std::make_unique<nam::NamModel>(model);
@@ -1353,7 +1355,7 @@ private:
             static_cast<std::uint32_t>(kInternalBlock), static_cast<std::uint32_t>(sample_rate_),
             lease);
         if (!engine.node) return nullptr;
-        if (!lease) return nullptr;
+        if (lease.generation() != 0 && !lease) return nullptr;
         stack->node = std::move(engine.node);
         stack->backend = std::move(engine.backend);
         stack->program = engine.program;
