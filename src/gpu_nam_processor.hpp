@@ -356,6 +356,36 @@ public:
         return current_stack_->backend;
     }
 
+    // Called by the editor host on its UI thread. The lease carries no surface
+    // ownership. A worker accepts it only while its generation remains current.
+    void set_gpu_surface_lease(GpuNamSurfaceLease lease) {
+        const bool available = static_cast<bool>(lease);
+        {
+            std::lock_guard<std::mutex> lock(surface_lease_mutex_);
+            surface_lease_ = std::move(lease);
+        }
+        if (!available) {
+            gpu_active_.store(nullptr, std::memory_order_seq_cst);
+            gpu_engine_active_.store(false, std::memory_order_release);
+        }
+        surface_lease_generation_.fetch_add(1, std::memory_order_release);
+    }
+
+    void invalidate_gpu_surface_lease() { invalidate_gpu_surface(); }
+
+    // Bridge methods for a view host observer. The source owns only the lease
+    // state, never the host surface. Call invalidate before the host destroys
+    // or replaces its surface.
+    void publish_gpu_surface(render::GpuSurface* surface) {
+        surface_lease_source_.publish(surface);
+        set_gpu_surface_lease(surface_lease_source_.lease());
+    }
+
+    void invalidate_gpu_surface() {
+        surface_lease_source_.invalidate();
+        set_gpu_surface_lease({});
+    }
+
     /// Legacy {worker-produced blocks, transport misses}. UI/main-thread only.
     /// These are not selected GPU output or proof of a CPU fallback delivery.
     std::pair<std::uint64_t, std::uint64_t> gpu_block_stats() const {
@@ -922,6 +952,7 @@ private:
     // (last) is destroyed before node — required, as the transport points into the
     // node.
     struct GpuStack {
+        GpuNamSurfaceLease surface_lease;
         std::unique_ptr<nam::NamModel> model;
         std::unique_ptr<gpu_audio::GpuAudioNode> node;
         std::string backend;
@@ -1308,12 +1339,23 @@ private:
     // audio thread. Returns nullptr on any failure (no GPU device, unsupported
     // shape) — the caller then routes the CPU engine. Non-RT.
     std::unique_ptr<GpuStack> build_gpu_stack(const nam::NamModel& model) {
+        GpuNamSurfaceLease lease;
+        {
+            std::lock_guard<std::mutex> lock(surface_lease_mutex_);
+            lease = surface_lease_;
+        }
+        // An empty lease (generation 0) builds on the node's own device; a
+        // handed-over lease that is no longer current builds nothing.
+        if (lease.generation() != 0 && !lease) return nullptr;
         auto stack = std::make_unique<GpuStack>();
+        stack->surface_lease = lease;
         stack->model = std::make_unique<nam::NamModel>(model);
         auto engine = nam::prepare_gpu_nam_engine(
             stack->model.get(), static_cast<std::uint32_t>(kChannels),
-            static_cast<std::uint32_t>(kInternalBlock), static_cast<std::uint32_t>(sample_rate_));
+            static_cast<std::uint32_t>(kInternalBlock), static_cast<std::uint32_t>(sample_rate_),
+            lease);
         if (!engine.node) return nullptr;
+        if (lease.generation() != 0 && !lease) return nullptr;
         stack->node = std::move(engine.node);
         stack->backend = std::move(engine.backend);
         stack->program = engine.program;
@@ -1563,6 +1605,8 @@ private:
         worker_run_.store(true, std::memory_order_release);
         last_seen_model_gen_ = model_req_generation_.load(std::memory_order_acquire);
         last_seen_ir_gen_ = ir_req_generation_.load(std::memory_order_acquire);
+        last_seen_surface_lease_gen_ =
+            surface_lease_generation_.load(std::memory_order_acquire);
         worker_ = std::thread([this] { worker_loop(); });
     }
 
@@ -1634,6 +1678,18 @@ private:
                 } else {
                     runtime::log_error("GPU NAM: load_model('{}') failed ({}).", path, err);
                 }
+            }
+
+            const auto surface_gen =
+                surface_lease_generation_.load(std::memory_order_acquire);
+            if (surface_gen != last_seen_surface_lease_gen_) {
+                last_seen_surface_lease_gen_ = surface_gen;
+                nam::NamRuntime m;
+                {
+                    std::lock_guard<std::mutex> lock(model_mutex_);
+                    m = model_;
+                }
+                if (loaded_ok_ && m.gpu_eligible()) rebuild_gpu_stack(m);
             }
 
             // Slim size change? Only a packed SlimmableContainer has selectable
@@ -1813,6 +1869,11 @@ private:
     std::string requested_model_path_;
     std::atomic<std::uint32_t> model_req_generation_{0};
     std::uint32_t last_seen_model_gen_ = 0;
+    mutable std::mutex surface_lease_mutex_;
+    GpuNamSurfaceLeaseSource surface_lease_source_;
+    GpuNamSurfaceLease surface_lease_;
+    std::atomic<std::uint32_t> surface_lease_generation_{0};
+    std::uint32_t last_seen_surface_lease_gen_ = 0;
 
     // IR live-load request + display state (UI/worker only).
     std::mutex ir_req_mutex_;
