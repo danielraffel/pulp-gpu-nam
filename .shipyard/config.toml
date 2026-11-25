@@ -1,0 +1,16 @@
+# Shipyard settings this repository's base branch carries.
+
+[auto_merge]
+# Who may sign the fleet App's `verdict: APPROVE`: an approval posted through
+# ghapp counts only with a `reviewer: <name>` line naming one of these. The
+# `review-verdict` status reads only this list and refuses every App approval
+# in a review-required repository that has none.
+reviewer_signers = ["pulp-review", "infra-review2"]
+# Only a scheduled reviewer pass may approve: an App APPROVE counts only when
+# its ghapp session stamp matches one of these globs (a HOLD from any session
+# still counts).
+reviewer_stamp_sessions = ["fleet-pass-reviewer-*"]
+
+[validation]
+# GPU NAM has no repository skill-sync or version-bump gates.
+pr_gates = false
