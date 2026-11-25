@@ -90,9 +90,9 @@ endif()
 # CMAKE_PREFIX_PATH at the SDK install prefix when enabling it.
 option(GPU_NAM_USE_INSTALLED_PULP
     "Build against an installed Pulp SDK (find_package(Pulp)) instead of the ./pulp submodule" OFF)
-set(GPU_NAM_EXPECTED_PULP_VERSION "1.172.1" CACHE STRING "Exact installed Pulp package version")
+set(GPU_NAM_EXPECTED_PULP_VERSION "1.209.0" CACHE STRING "Exact installed Pulp package version")
 set(GPU_NAM_EXPECTED_VELLUM_VERSION "0.2.2" CACHE STRING "Exact installed Vellum package version")
-set(GPU_NAM_EXPECTED_VELLUM_GPU_RUNTIME_VERSION "0.1.10" CACHE STRING "Exact installed VellumGpuRuntime package version")
+set(GPU_NAM_EXPECTED_VELLUM_GPU_RUNTIME_VERSION "0.2.2" CACHE STRING "Exact installed VellumGpuRuntime package version")
 
 set(GPU_NAM_EXPECTED_PULP_SOURCE_SHA "" CACHE STRING
     "Optional exact installed Pulp SDK source commit for validation")
@@ -223,10 +223,14 @@ if(GPU_NAM_BUILD_TESTS)
     set_tests_properties(gpu-nam-production-receipt-contract PROPERTIES
         LABELS "validation;receipt")
     if(GPU_NAM_USE_INSTALLED_PULP)
+        # The fixture resolves the same packages this configure found: the
+        # Vellum prefix comes from Vellum_DIR, so an unset environment cannot
+        # point the check at a different install.
+        get_filename_component(_gpu_nam_vellum_prefix "${Vellum_DIR}/../../.." ABSOLUTE)
         add_test(NAME gpu-nam-installed-sdk-consumer
             COMMAND ${Python3_EXECUTABLE} -B
                 ${CMAKE_CURRENT_SOURCE_DIR}/tools/validation/test_installed_sdk_consumer.py)
         set_tests_properties(gpu-nam-installed-sdk-consumer PROPERTIES
-            ENVIRONMENT "GPU_NAM_PULP_SDK=${PULP_SDK_DIR};GPU_NAM_VELLUM_SDK=$ENV{GPU_NAM_VELLUM_SDK}")
+            ENVIRONMENT "GPU_NAM_PULP_SDK=${PULP_SDK_DIR};GPU_NAM_VELLUM_SDK=${_gpu_nam_vellum_prefix};GPU_NAM_EXPECTED_PULP_VERSION=${GPU_NAM_EXPECTED_PULP_VERSION};GPU_NAM_EXPECTED_VELLUM_VERSION=${GPU_NAM_EXPECTED_VELLUM_VERSION};GPU_NAM_EXPECTED_VELLUM_GPU_RUNTIME_VERSION=${GPU_NAM_EXPECTED_VELLUM_GPU_RUNTIME_VERSION}")
     endif()
 endif()
