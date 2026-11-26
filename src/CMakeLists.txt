@@ -46,6 +46,15 @@ if(APPLE)
 endif()
 
 if(TARGET Catch2::Catch2WithMain)
+    add_executable(gpu-nam-surface-lease-test
+        test_gpu_nam_surface_lease.cpp)
+    target_link_libraries(gpu-nam-surface-lease-test
+        PRIVATE Catch2::Catch2WithMain)
+    target_include_directories(gpu-nam-surface-lease-test
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    add_test(NAME gpu-nam-surface-lease
+        COMMAND gpu-nam-surface-lease-test)
+
     add_executable(gpu-nam-gpu-cpu-diagnostic-options-test
         test_gpu_nam_gpu_cpu_diagnostic_options.cpp)
     target_link_libraries(gpu-nam-gpu-cpu-diagnostic-options-test
@@ -77,6 +86,14 @@ if(TARGET pulp::render)
         target_link_libraries(gpu-nam-test PRIVATE pulp::render Catch2::Catch2WithMain)
         target_include_directories(gpu-nam-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
         add_test(NAME gpu-nam-test COMMAND gpu-nam-test)
+
+        add_executable(gpu-nam-ownership-test test_gpu_nam_ownership.cpp)
+        target_link_libraries(gpu-nam-ownership-test
+            PRIVATE pulp::render pulp::runtime Catch2::Catch2WithMain)
+        target_include_directories(gpu-nam-ownership-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+        target_compile_definitions(gpu-nam-ownership-test PRIVATE
+            GPU_NAM_MODELS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/models")
+        add_test(NAME gpu-nam-ownership-test COMMAND gpu-nam-ownership-test)
 
         # Fused GPU NAM forward validated against the exact CPU oracle on the real
         # .nam capture. Needs both pulp::render (GPU primitive) and pulp::runtime

@@ -19,11 +19,13 @@
 
 #include "gpu_nam.hpp"
 #include "gpu_nam_prepared_program.hpp"
+#include "gpu_nam_surface_lease.hpp"
 #include "nam_model.hpp"
 
 #include <algorithm>
 #include <pulp/audio/buffer.hpp>
 #include <pulp/gpu_audio/gpu_audio_node.hpp>
+#include <pulp/render/gpu_surface.hpp>
 
 #include <array>
 #include <memory>
@@ -38,11 +40,15 @@ inline constexpr std::uint32_t kNamChannels = 64;
 class GpuNamCloudNode : public gpu_audio::GpuAudioNode {
 public:
     GpuNamCloudNode(std::uint32_t channels, std::uint32_t block_size,
-                    std::uint32_t sample_rate, const nam::NamModel* model)
+                    std::uint32_t sample_rate, const nam::NamModel* model,
+                    render::GpuSurface* surface = nullptr,
+                    GpuNamSurfaceLease lease = {})
         : channels_(channels),
           block_size_(block_size),
           sample_rate_(sample_rate),
-          model_(model) {}
+          model_(model),
+          surface_(surface),
+          lease_(std::move(lease)) {}
 
     gpu_audio::GpuAudioNodeDescriptor descriptor() const override {
         gpu_audio::GpuAudioNodeDescriptor d;
@@ -65,15 +71,40 @@ public:
     // processor routes the inline CPU engine) if no device is available or the
     // model shape is unsupported on the GPU.
     bool prepare() override {
+        // A live surface lease shares the host surface's device. A lease that
+        // was handed over and has since been invalidated fails closed, so the
+        // processor keeps its CPU engine while the host replaces its surface.
+        // With no lease the node creates its own device, which is how the
+        // plug-in runs until the host can hand its editor surface over.
+        if (auto* surface = lease_.get()) return prepare_from_surface(*surface);
+        if (lease_.generation() != 0) return false;
+        if (surface_ != nullptr) return prepare_from_surface(*surface_);
+        return prepare_on(nullptr);
+    }
+
+    // Non-RT: adopt the host-owned device and prepare one plan per channel.
+    // The surface is borrowed and must outlive this node.
+    bool prepare_from_surface(render::GpuSurface& surface) {
+        return prepare_on(&surface);
+    }
+
+    // Non-RT: prepare on the given host surface's device, or on a device of
+    // this node's own when `surface` is null.
+    bool prepare_on(render::GpuSurface* surface) {
         prepared_program_ = {};
         if (!model_ || channels_ == 0 || channels_ > kNamChannels) return false;
         fallback_write_slot_ = 0;
         for (auto& slots : fallback_slots_)
             slots.clear();
-        // One device for all channels. If it can't be created, fail closed so the
-        // processor routes the inline CPU engine (same contract as before).
+        surface_ = surface;
+        // One compute object for all channels. If no device can be created or
+        // adopted, the processor routes the inline CPU engine.
         shared_gpu_ = render::GpuCompute::create();
-        if (!shared_gpu_ || !shared_gpu_->initialize_standalone()) return false;
+        if (!shared_gpu_) return false;
+        const bool initialized = surface != nullptr
+            ? shared_gpu_->initialize_from_surface(*surface)
+            : shared_gpu_->initialize_standalone();
+        if (!initialized) return false;
         // Prewarm both the GPU forward's on-device history and the CPU fallback to
         // the model's silence steady-state (a NAM capture's silence response is not
         // zero, and the dilated history takes a full receptive field to populate).
@@ -171,6 +202,10 @@ public:
                 for (std::uint32_t i = 0; i < n; ++i) out[i] = 0.0f;
                 continue;
             }
+            if (lease_.generation() != 0 && !lease_) {
+                cpu_[ch].process(in, out, n);
+                continue;
+            }
             // On device loss / readback timeout, forward() leaves `out` holding the
             // previous block (a stuck, repeating block if published as-is). Fall back
             // to the prewarmed per-channel CPU oracle so the worker still emits fresh,
@@ -203,6 +238,8 @@ private:
     std::uint32_t block_size_ = 0;
     std::uint32_t sample_rate_ = 0;
     const nam::NamModel* model_ = nullptr;
+    render::GpuSurface* surface_ = nullptr; // borrowed host surface
+    GpuNamSurfaceLease lease_;
 
     // One device shared by every channel; each GpuNam below holds a non-owning
     // pointer to it and its own (block_size, instance=channel) plan slot.

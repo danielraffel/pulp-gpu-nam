@@ -1,6 +1,7 @@
 #pragma once
 
 #include "gpu_nam_prepared_program.hpp"
+#include "gpu_nam_surface_lease.hpp"
 #include "nam_model.hpp"
 #if defined(GPU_NAM_EXPERIMENTAL_STAMPED_WAVENET) &&                           \
     defined(GPU_NAM_EXPERIMENTAL_SHARED_WAVENET_SESSION)
@@ -61,7 +62,8 @@ inline GpuNamProgramError bind_gpu_nam_engine_program(
 inline PreparedGpuNamEngine prepare_gpu_nam_engine(const NamModel *model,
                                                    std::uint32_t channels,
                                                    std::uint32_t frames,
-                                                   std::uint32_t sample_rate) {
+                                                   std::uint32_t sample_rate,
+                                                   const GpuNamSurfaceLease& lease = {}) {
   PreparedGpuNamEngine result;
   if (!model || channels == 0 || channels > 64 || frames == 0 ||
       sample_rate == 0 || model->arrays().empty() ||
@@ -86,7 +88,8 @@ inline PreparedGpuNamEngine prepare_gpu_nam_engine(const NamModel *model,
   result.backend = node->backend();
 #else
   auto node =
-      std::make_unique<GpuNamCloudNode>(channels, frames, sample_rate, model);
+      std::make_unique<GpuNamCloudNode>(channels, frames, sample_rate, model,
+                                        nullptr, lease);
   if (!node->prepare() || !node->gpu_available())
     return result;
   result.backend = node->backend();
