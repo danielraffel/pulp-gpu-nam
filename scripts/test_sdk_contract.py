@@ -20,5 +20,5 @@ class SdkContractTests(unittest.TestCase):
  def test_source_mode_refused(self):self.check(dict(GPU_NAM_EXPECTED_PULP_SOURCE_SHA=SHA),False,'installed-SDK mode')
  def test_stamped_provider_absent(self):self.check(dict(GPU_NAM_USE_INSTALLED_PULP='ON',GPU_NAM_EXPERIMENTAL_STAMPED_WAVENET='ON'),False,'Dawn shared-I/O provider')
  def test_stamped_provider_present(self):self.check(dict(GPU_NAM_USE_INSTALLED_PULP='ON',GPU_NAM_EXPERIMENTAL_STAMPED_WAVENET='ON',PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO='ON'),True)
- def test_wrong_vellum_identity(self):self.check(dict(GPU_NAM_USE_INSTALLED_PULP='ON',GPU_NAM_EXPECTED_VELLUM_VERSION='9.9.9',Vellum_VERSION='0.2.2'),False,'Vellum package version')
+ def test_wrong_vellum_identity(self):self.check(dict(GPU_NAM_USE_INSTALLED_PULP='ON',GPU_NAM_EXPECTED_VELLUM_VERSION='9.9.9',Vellum_VERSION='0.2.3'),False,'Vellum package version')
 if __name__=='__main__':unittest.main()

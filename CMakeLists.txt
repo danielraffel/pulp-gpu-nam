@@ -90,9 +90,9 @@ endif()
 # CMAKE_PREFIX_PATH at the SDK install prefix when enabling it.
 option(GPU_NAM_USE_INSTALLED_PULP
     "Build against an installed Pulp SDK (find_package(Pulp)) instead of the ./pulp submodule" OFF)
-set(GPU_NAM_EXPECTED_PULP_VERSION "1.209.0" CACHE STRING "Exact installed Pulp package version")
-set(GPU_NAM_EXPECTED_VELLUM_VERSION "0.2.2" CACHE STRING "Exact installed Vellum package version")
-set(GPU_NAM_EXPECTED_VELLUM_GPU_RUNTIME_VERSION "0.2.2" CACHE STRING "Exact installed VellumGpuRuntime package version")
+set(GPU_NAM_EXPECTED_PULP_VERSION "1.215.0" CACHE STRING "Exact installed Pulp package version")
+set(GPU_NAM_EXPECTED_VELLUM_VERSION "0.2.3" CACHE STRING "Exact installed Vellum package version")
+set(GPU_NAM_EXPECTED_VELLUM_GPU_RUNTIME_VERSION "0.2.3" CACHE STRING "Exact installed VellumGpuRuntime package version")
 
 set(GPU_NAM_EXPECTED_PULP_SOURCE_SHA "" CACHE STRING
     "Optional exact installed Pulp SDK source commit for validation")
