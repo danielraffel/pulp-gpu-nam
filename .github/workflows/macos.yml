@@ -1,0 +1,74 @@
+name: macos
+
+# Builds GPU NAM against the released Pulp and Vellum SDKs and runs its test
+# suite. Hosted macOS runners expose no usable GPU, so the GPU cases report
+# "GPU engine unavailable" and skip; the GPU proof stays a local Metal run.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PULP_SDK_VERSION: "1.209.0"
+  PULP_SDK_SHA256: "68620a00c21a53090fd0f8cdacc9c2615ba2386c929bc488f1545b61c614e92d"
+  VELLUM_SDK_VERSION: "0.2.2"
+  VELLUM_SDK_SHA256: "d87655d847987a6aa50992b2e90c91cceb9ec15e84ca01d8ef69265275d048f2"
+
+jobs:
+  macos:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      - name: Check the workflow contract
+        run: python3 -I scripts/test_macos_workflow.py
+
+      # The released SDK libraries are built with the macOS 26 SDK, so link
+      # with the newest Xcode 26 the image carries.
+      - name: Select Xcode 26
+        run: |
+          xcode=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$xcode" ]; then
+            echo "::error::no Xcode 26 on this image"; ls -d /Applications/Xcode*.app; exit 1
+          fi
+          sudo xcode-select -s "$xcode"
+          xcodebuild -version
+
+      - name: Fetch the released SDKs
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/sdk/pulp" "$RUNNER_TEMP/sdk/vellum"
+          curl -fsSL -o "$RUNNER_TEMP/pulp-sdk.tgz" \
+            "https://github.com/Generous-Corp/pulp/releases/download/v${PULP_SDK_VERSION}/pulp-sdk-darwin-arm64.tar.gz"
+          curl -fsSL -o "$RUNNER_TEMP/vellum-sdk.tgz" \
+            "https://github.com/Generous-Corp/vellum/releases/download/v${VELLUM_SDK_VERSION}/vellum-sdk-${VELLUM_SDK_VERSION}-darwin-arm64.tar.gz"
+          echo "${PULP_SDK_SHA256}  $RUNNER_TEMP/pulp-sdk.tgz" | shasum -a 256 -c -
+          echo "${VELLUM_SDK_SHA256}  $RUNNER_TEMP/vellum-sdk.tgz" | shasum -a 256 -c -
+          tar -xzf "$RUNNER_TEMP/pulp-sdk.tgz" -C "$RUNNER_TEMP/sdk/pulp"
+          tar -xzf "$RUNNER_TEMP/vellum-sdk.tgz" -C "$RUNNER_TEMP/sdk/vellum"
+          echo "PULP_SDK=$RUNNER_TEMP/sdk/pulp/pulp-sdk" >> "$GITHUB_ENV"
+          echo "VELLUM_SDK=$RUNNER_TEMP/sdk/vellum/sdk" >> "$GITHUB_ENV"
+
+      - name: Configure
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+            -DGPU_NAM_USE_INSTALLED_PULP=ON -DGPU_NAM_BUILD_TESTS=ON \
+            -DPulp_DIR="$PULP_SDK/lib/cmake/Pulp" \
+            -DCMAKE_PREFIX_PATH="$PULP_SDK;$VELLUM_SDK"
+
+      - name: Build
+        run: cmake --build build -j3
+
+      # auval and pluginval validate an installed plug-in and are run locally.
+      - name: Test
+        run: ctest --test-dir build -E "auval|pluginval" --output-on-failure -j3
