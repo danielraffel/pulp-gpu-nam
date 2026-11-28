@@ -24,11 +24,14 @@ env:
   VELLUM_SDK_SHA256: "d87655d847987a6aa50992b2e90c91cceb9ec15e84ca01d8ef69265275d048f2"
 
 jobs:
-  build-and-test:
+  macos:
     runs-on: macos-15
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      - name: Check the workflow contract
+        run: python3 -I scripts/test_macos_workflow.py
 
       # The released SDK libraries are built with the macOS 26 SDK, so link
       # with the newest Xcode 26 the image carries.

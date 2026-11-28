@@ -99,6 +99,5 @@ Use a bounded job count (`-j8` here) rather than every core on a shared machine.
 (versions and SHA-256 digests are pinned in the workflow) on a hosted macOS
 runner and runs the test suite except `auval` and `pluginval`. Hosted runners
 have no usable GPU, so the GPU cases skip there; run the suite on an Apple
-Silicon Mac to exercise them. `review-verdict.yml` posts the `review-verdict`
-status from a pinned Shipyard rule; its signers are listed in
-`.shipyard/config.toml`.
+Silicon Mac to exercise them. The workflow's single job is named `macos`, which
+is the status context a branch ruleset requires.
